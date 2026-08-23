@@ -1,0 +1,18 @@
+# Machine-local overrides — never tracked.
+*.local
+
+# The documented override files are named `local.*`, not `*.local`, so the
+# pattern above does not catch them. They belong in ~/.config, not in here —
+# this is a safety net against one landing in the repo with secrets in it.
+local.zsh
+local.ghostty
+
+# Per-project coding-agent permission state.
+.claude/settings.local.json
+
+# install.sh renders atomic writes next to the *destination*, not in here, so
+# this is a backstop for scratch files that escape into the repo — not the
+# primary guard.
+.dotfiles-tmp.*
+
+.DS_Store
