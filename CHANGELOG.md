@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `Brewfile` and `setup.sh` to install daily macOS development tools and coding agents via Homebrew
+  (Ghostty, Zed, Herdr, T3 Code, OpenAI Codex, GitHub Copilot CLI, Google Antigravity CLI, and xAI
+  Grok Build), plus automated installation for Herdr session identity integrations.
+- Guide to agent tooling (`docs/agent-tooling.md`), detailing package management decisions,
+  `auto_updates` cask behavior, and Herdr integration requirements and traps.
 - Initial public documentation: the no-symlink delivery model, what is in scope for this repo and
   what deliberately stays private, and a guide to getting reliable "agent finished" notifications
   when running coding agents inside Herdr on macOS.
