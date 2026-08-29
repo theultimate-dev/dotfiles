@@ -1,0 +1,24 @@
+# Managed git configuration — The Ultimate Dev / dotfiles (public).
+#
+# This file is never installed over your git config. It is pulled in by an
+# [include] directive from ${XDG_CONFIG_HOME:-~/.config}/git/config, which git
+# reads BEFORE ~/.gitconfig — so anything you set yourself overrides everything
+# here. See docs/git-push-defaults.md.
+#
+# No [user] section lives here, ever. Identity belongs in ~/.gitconfig.
+
+[push]
+	# Create the remote branch on first push instead of erroring. Applies only
+	# when the branch has NO upstream -- which is why the branch.* key below is
+	# not optional. Requires git >= 2.37.
+	autoSetupRemote = true
+
+	# Pinned, not inherited: autoSetupRemote takes effect only under simple,
+	# upstream, or current. `current` was rejected -- see docs/git-push-defaults.md.
+	default = simple
+
+[branch]
+	# Track a remote branch only when it has the SAME name. Branching from
+	# origin/main into feat/x therefore leaves no upstream, which is exactly the
+	# state autoSetupRemote handles. Requires git >= 2.37.
+	autoSetupMerge = simple
