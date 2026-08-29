@@ -264,6 +264,13 @@ welcome — but it does not replace `--dry-run` and `--check`.
 - `docs/` holds deep dives for the pieces whose *rationale* is non-obvious — the reasoning that
   would otherwise be lost, including rejected alternatives and upstream bugs worked around.
   `docs/herdr-notifications.md` sets the expected depth and tone.
+- `docs/manual-setup.md` is the exception, and the only one: a **how-to**, not a deep dive. It
+  holds every command a reader runs by hand, in order, with a verify and an undo for each. It
+  carries no rationale beyond a one-line pointer into the `docs/` page that explains the choice.
+- **A command that writes to `$HOME` appears exactly once in the repository.** Procedures live in
+  `docs/manual-setup.md`; the reasoning behind them lives in `docs/`. A deep dive may name a
+  setting in prose, but a second copy-pasteable block is a defect — two copies of a command that
+  edits a live machine will drift, and nothing here can check them against each other.
 - Document the trap, not the API. If a behaviour surprised you, that is the paragraph worth writing.
 - **Wrap prose at 100 columns.** Tables, code blocks, and long URLs are exempt — never break those
   to fit. Consistent width keeps `git diff` readable when a paragraph is edited years later.
