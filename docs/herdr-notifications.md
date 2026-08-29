@@ -46,36 +46,35 @@ is on `PATH`, and falls back to `osascript` if it is not. On Linux it uses `noti
 
 ## Recommended setup: local agents on macOS
 
-```toml
-# ~/.config/herdr/config.toml
+Herdr reads `~/.config/herdr/config.toml`, and four values in it are worth setting deliberately.
+[Step 5 of the manual setup guide](manual-setup.md#5-herdr-notifications) carries the file contents,
+the reload command and the rollback; this section is why each value is what it is.
 
-[ui.toast]
-delivery = "system"
-delay_seconds = 1        # default; suppresses notifications for blips shorter than this
+**`delivery = "system"`, under `[ui.toast]`.** The one that matters. Herdr owns the PTY, so the
+terminal-side path is already broken before you configure anything, and `"system"` is what replaces
+it — Herdr calling the OS notification service itself rather than asking the terminal to. The
+section below on `"terminal"` is the long argument for choosing it over the intuitive alternative.
 
-[ui.sound]
-enabled = true
+**`delay_seconds`, left at its default of `1`.** It swallows state changes shorter than the delay,
+which is what keeps a fast tool call from flashing a banner at you. Lowering it does not make you
+better informed; it turns every momentary pause into an interruption.
 
-[ui.sound.agents]        # optional: per-agent, "default" | "on" | "off"
-claude = "on"
+**`enabled = true`, under `[ui.sound]`.** A banner you have to be looking at the screen to see is
+half a notification, and the point of running several agents at once is that you are not watching
+any of them. Per-agent overrides live in `[ui.sound.agents]` and are worth knowing about before you
+turn sound on globally: one chatty agent is the usual reason people give up on notification sounds
+entirely, and muting just that one is cheaper than going silent everywhere. [Sounds](#sounds) below
+covers the formats and path rules.
 
-[keys]
-open_notification_target = "prefix+g"   # jump to the pane behind the last notification
-```
+**`open_notification_target`, bound under `[keys]`.** A banner tells you *that* an agent finished,
+not which of them did — and across a fleet of panes that is most of the question. The binding jumps
+to the pane behind the last notification, which is what turns the banner into navigation rather than
+a nudge to go hunting.
 
-And install the notifier so clicking a notification does something useful:
-
-```sh
-brew install terminal-notifier
-```
-
-Apply without restarting your session:
-
-```sh
-herdr config check          # validate the TOML first
-herdr server reload-config  # hot-reload the running server
-herdr notification show "test" --body "hello" --sound done
-```
+None of this needs a restart: Herdr validates and hot-reloads the file on request, which is also the
+quickest way to discover that a table name was typed wrong. On macOS, though, judge nothing until
+`terminal-notifier` is on `PATH` — without it every notification still fires, and every one of them
+arrives wearing the wrong application's face.
 
 ### Why `terminal-notifier` is not optional in practice
 
@@ -160,13 +159,12 @@ going silent everywhere.
 
 ## Agent-side setup
 
-Herdr ships integrations that teach each agent to report its session to the multiplexer:
+Herdr ships integrations that teach each agent to report its session to the multiplexer. `setup.sh`
+registers them for every agent whose configuration directory already exists;
+[step 5 of the manual setup guide](manual-setup.md#5-herdr-notifications) covers installing one for
+an agent that arrived afterwards.
 
-```sh
-herdr integration install claude
-```
-
-For Claude Code this drops `~/.claude/hooks/herdr-agent-state.sh` and registers it as a
+For Claude Code the integration drops `~/.claude/hooks/herdr-agent-state.sh` and registers it as a
 `SessionStart` hook in `~/.claude/settings.json`. The hook only reports the session id over Herdr's
 Unix socket — it never notifies. Detection of finished / needs-attention is Herdr's, from the pane
 contents.
