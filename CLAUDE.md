@@ -17,7 +17,10 @@ Claude-specific and is deliberately stated nowhere else.
   past-tense descriptions and scope selection this repo uses.
 - **`writing-adrs`** when a decision about the delivery model will outlive the change that
   introduces it: a rejected alternative worth recording, a new destination mechanism, a precedence
-  trap. The private original's `docs/install-model.md` is the precedent for that kind of write-up.
+  trap. Records go in `docs/decisions/` as `NNNN-kebab-title.md`, numbered append-only. Read the
+  existing ones first — `0001`–`0005` already cover the no-symlink model, the git destination, the
+  Homebrew channel, auto-updating casks, and why agent config is unmanaged, so a new decision is
+  often a *supersede* rather than a fresh number.
 
 ## Working style here
 

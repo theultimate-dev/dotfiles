@@ -136,6 +136,7 @@ end of [Manual setup](docs/manual-setup.md#what-the-installer-will-take-over).
 | `git/` | Managed git configuration |
 | [`LICENSE`](LICENSE) | MIT — see [Licence and scope](#licence-and-scope) |
 | `docs/` | Deep dives on the pieces whose reasoning is not obvious from the code |
+| [`docs/decisions/`](docs/decisions/) | Architecture decision records — why a choice was made, and what was rejected |
 
 ## Documentation
 
@@ -145,6 +146,11 @@ end of [Manual setup](docs/manual-setup.md#what-the-installer-will-take-over).
 - [Agent tooling & installation](docs/agent-tooling.md) — why Homebrew is used for all daily tools,
   how `auto_updates` casks behave, the Herdr integration lifecycle, and how to avoid installer traps
   when juggling multiple coding agents on macOS.
+- [Decision records](docs/decisions/) — the choices that outlive the change that introduced them,
+  each in five terse sections with the alternative that lost. Start with
+  [0001](docs/decisions/0001-deliver-configs-as-include-stubs-not-symlinks.md) for the no-symlink
+  model and [0002](docs/decisions/0002-include-git-config-from-xdg-never-gitconfig.md) for why this
+  repo never writes your `~/.gitconfig`.
 - [Git push defaults](docs/git-push-defaults.md) — why `push.autoSetupRemote = true` on its own does
   not do what everyone expects, why `branch.autoSetupMerge = simple` is the other half of it, and
   why the popular `push.default = current` workaround is worse than the problem: the push succeeds,
@@ -158,8 +164,10 @@ end of [Manual setup](docs/manual-setup.md#what-the-installer-will-take-over).
 ## Conventions
 
 This repo runs on [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/),
-[Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html), and
-[Conventional Commits 1.0.0](https://www.conventionalcommits.org/en/v1.0.0/).
+[Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html),
+[Conventional Commits 1.0.0](https://www.conventionalcommits.org/en/v1.0.0/), and
+[Michael Nygard's ADR format](https://cognitect.com/blog/2011/11/15/documenting-architecture-decisions)
+for [`docs/decisions/`](docs/decisions/).
 [`AGENTS.md`](AGENTS.md) is the full contract; it binds human contributors and coding agents alike.
 
 ## Licence and scope
