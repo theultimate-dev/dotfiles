@@ -10,6 +10,13 @@ local.ghostty
 # Per-project coding-agent permission state.
 .claude/settings.local.json
 
+# Implementation specs written while planning a change. Deliberately untracked:
+# a spec describes a plan at one moment, not the system, and it rots the day the
+# code moves on. What outlives the change is the decision and its reasoning, and
+# that gets distilled into docs/decisions/ instead. See .ignore — these files
+# stay searchable by coding agents even though git never sees them.
+spec/
+
 # install.sh renders atomic writes next to the *destination*, not in here, so
 # this is a backstop for scratch files that escape into the repo — not the
 # primary guard.

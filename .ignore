@@ -1,0 +1,8 @@
+# Search-tool overrides. This file is NOT a git mechanism — git never reads it.
+# It is read by ripgrep and the tools built on it, where it outranks .gitignore.
+#
+# spec/ is git-ignored (see .gitignore) but must stay searchable, so coding
+# agents can index it and @-mention its files. Only negating the directory
+# itself works: nothing beneath an excluded directory can be re-included, so
+# `!spec/**` and `!spec/*.md` both silently fail where `!spec/` succeeds.
+!spec/
