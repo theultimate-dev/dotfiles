@@ -12,6 +12,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `Brewfile` and `setup.sh` to install daily macOS development tools and coding agents via Homebrew
   (Ghostty, Zed, Herdr, T3 Code, OpenAI Codex, GitHub Copilot CLI, Google Antigravity CLI, and xAI
   Grok Build), plus automated installation for Herdr session identity integrations.
+- Decision records in `docs/decisions/`, in Michael Nygard's five-section ADR format, recording why
+  the delivery model is what it is: include stubs instead of symlinks, git included from
+  `~/.config/git/config`, Homebrew as the single install channel, auto-updating casks left to manage
+  themselves, and agent configuration deliberately unmanaged — each with the alternative that lost.
 - Git push defaults (`git/.gitconfig`), the first managed configuration in this repo: pushing a
   new local branch now creates the matching remote branch and tracks it, instead of failing with a
   name mismatch or pushing to the branch you started from. Requires git 2.37 or newer. Nothing
@@ -21,6 +25,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Guide to git push defaults (`docs/git-push-defaults.md`), covering why `push.autoSetupRemote`
   alone does not create the remote branch, why the popular `push.default = current` workaround
   leaves the upstream pointing at the wrong branch, and a git worktree branch-naming trap.
+- `.ignore` file that keeps the untracked `spec/` directory readable by search tools, so
+  implementation specs stay out of version control without becoming invisible to coding agents.
 - Initial public documentation: the no-symlink delivery model, what is in scope for this repo and
   what deliberately stays private, and a guide to getting reliable "agent finished" notifications
   when running coding agents inside Herdr on macOS.
@@ -34,6 +40,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `AGENTS.md` no longer describes git configuration as a shared `~/.gitconfig` owned through
+  BEGIN/END sentinel blocks. That scheme was superseded when the repo moved to including from
+  `~/.config/git/config`, and the invariant, the precedence table and the machine-local override
+  column now match what the installer will actually do.
 - The Herdr notifications guide and the README no longer carry setup commands; they explain the
   reasoning and link to `docs/manual-setup.md` for the steps, so any command that writes to your
   home directory now appears in exactly one place in this repository.

@@ -97,8 +97,8 @@ before it is replaced. Writes are atomic: render to a temp file in the same dire
 Re-running an unchanged install is a true no-op. Ambiguity is a hard error, never a guess.
 
 **This repo is never the sole manager of a destination file.** It is installed alongside a second,
-private dotfiles repo on the same machine, and both want to write `~/.gitconfig`. The installer
-therefore owns a **named, delimited block** — its own BEGIN/END markers — and preserves every byte
+private dotfiles repo on the same machine. Where a destination genuinely must be shared, the
+installer owns a **named, delimited block** — its own BEGIN/END markers — and preserves every byte
 outside it. It may not own "everything above a sentinel", and it may not rewrite a destination
 wholesale.
 
@@ -106,21 +106,25 @@ wholesale.
 > above the line and preserves only what is below cannot compose. Install two repos that both do
 > this and each run silently erases the other's block. Whichever ran last appears to work, which is
 > what makes it expensive to diagnose.
->
-> The concrete mechanism is still an open design decision. Settle it — and write it up as an ADR —
-> when `install.sh` lands. Do not let an installer merge without it.
+
+**For git, the sharing problem is avoided rather than solved.** This repo owns
+`~/.config/git/config` and never writes `~/.gitconfig`, so the two repos write two different files
+and no block negotiation is needed — see
+[ADR 0002](docs/decisions/0002-include-git-config-from-xdg-never-gitconfig.md). Prefer a separate
+destination over a shared file wherever a tool's include order allows it; reach for the named block
+only when it does not.
 
 **git and Ghostty have opposite include precedence.** This is the single most surprising thing here:
 
 | | Who wins | Machine-local overrides go |
 |---|---|---|
-| **git** | the **stub** — includes expand in place, so anything below the include beats the repo | `~/.gitconfig`, below the sentinel line |
+| **git** | **`~/.gitconfig`** — git reads `~/.config/git/config` first, and the later value wins | `~/.gitconfig`, which this repo never writes |
 | **Ghostty** | the **repo** — `config-file` is processed at the *end* of the containing file | `~/.config/ghostty/local.ghostty` |
 | **zsh** | **local** — later lines win | `~/.config/dotfiles/local.zsh`, sourced last |
 
-Practical consequence: `git config --global …` writes into the stub, not into this repo, and wins
-over it. That is intentional — the stub is the machine-local override layer — but it means such
-edits never show up in `git status` here.
+Practical consequence: `git config --global …` writes into `~/.gitconfig`, not into this repo, and
+wins over it. That is intentional — `~/.gitconfig` is the machine-local override layer — but it
+means such edits never show up in `git status` here.
 
 **The Powerlevel10k instant-prompt block stays first in `zsh/.zshrc`,** with nothing above it that
 can write to the terminal.
@@ -264,9 +268,23 @@ welcome — but it does not replace `--dry-run` and `--check`.
 - `docs/` holds deep dives for the pieces whose *rationale* is non-obvious — the reasoning that
   would otherwise be lost, including rejected alternatives and upstream bugs worked around.
   `docs/herdr-notifications.md` sets the expected depth and tone.
-- `docs/manual-setup.md` is the exception, and the only one: a **how-to**, not a deep dive. It
-  holds every command a reader runs by hand, in order, with a verify and an undo for each. It
-  carries no rationale beyond a one-line pointer into the `docs/` page that explains the choice.
+- `docs/decisions/` holds **ADRs** in Michael Nygard's five-section format: Title, Status, Context,
+  Decision, Consequences. One decision per file, `NNNN-kebab-title.md`, numbered append-only. An ADR
+  records *why* a choice was made, what was rejected, and what it costs — and is **written once and
+  not edited afterwards.** A reversal is a new ADR that supersedes the old one; the old record stays
+  as history. Use the `writing-adrs` skill rather than hand-rolling the format.
+- **An ADR and a deep dive are not the same document, and neither repeats the other.** The ADR
+  argues the decision and then stops; the `docs/` page explains how the thing behaves *now* —
+  mechanism, traps, current versions — and is updated freely as tools change. Each links to the
+  other. When a deep dive already carries the reasoning, the ADR states the decision and the
+  trade-off accepted and points at the page for detail.
+- **Implementation specs are not tracked.** `spec/` is git-ignored, because a spec describes a plan
+  at one moment rather than the system, and it rots as soon as the code moves. What outlives the
+  change is distilled into an ADR. A tracked `.ignore` file un-ignores `spec/` for search tools, so
+  coding agents can still read it — git and ripgrep disagree here deliberately.
+- `docs/manual-setup.md` is the only **how-to** here, not a deep dive. It holds every command a
+  reader runs by hand, in order, with a verify and an undo for each. It carries no rationale beyond
+  a one-line pointer into the `docs/` page that explains the choice.
 - **A command that writes to `$HOME` appears exactly once in the repository.** Procedures live in
   `docs/manual-setup.md`; the reasoning behind them lives in `docs/`. A deep dive may name a
   setting in prose, but a second copy-pasteable block is a defect — two copies of a command that
