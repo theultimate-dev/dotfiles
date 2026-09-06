@@ -277,16 +277,19 @@ herdr integration install claude
 ```
 
 Third, Claude Code's own notification channel, left enabled so the same agent still notifies
-correctly on the days you run it outside Herdr:
+correctly on the days you run it outside Herdr. `iterm2_with_bell` emits the OSC 9 sequence Ghostty
+turns into a banner *and* a terminal bell — the bell is what Zed's Terminal Threads, and any other
+terminal that never parses OSC 9, key their "agent finished" popup on. In Ghostty the bell only
+adds a Dock bounce and a 🔔 tab marker (tunable via `bell-features`):
 
 ```sh
 mkdir -p ~/.claude
-[ -f ~/.claude/settings.json ] || printf '{\n  "preferredNotifChannel": "iterm2"\n}\n' > ~/.claude/settings.json
+[ -f ~/.claude/settings.json ] || printf '{\n  "preferredNotifChannel": "iterm2_with_bell"\n}\n' > ~/.claude/settings.json
 ```
 
-If `~/.claude/settings.json` already exists, add `"preferredNotifChannel": "iterm2"` to its
-top-level object by hand and leave everything else alone — including the `SessionStart` hook Herdr
-put there.
+If `~/.claude/settings.json` already exists, add `"preferredNotifChannel": "iterm2_with_bell"` to
+its top-level object by hand and leave everything else alone — including the `SessionStart` hook
+Herdr put there.
 
 **Verify.**
 
@@ -298,7 +301,7 @@ grep -o '"preferredNotifChannel": *"[^"]*"' ~/.claude/settings.json
 ```
 [ui.toast]
 delivery = "system"
-"preferredNotifChannel": "iterm2"
+"preferredNotifChannel": "iterm2_with_bell"
 ```
 
 Then the live test, which needs the Herdr server running:

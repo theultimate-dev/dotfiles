@@ -175,8 +175,10 @@ Two things follow:
   alongside Herdr, and a synchronous `osascript` in a Stop hook can block the agent for the length
   of the hook timeout.
 - **Leave the agent's own notification channel enabled anyway** (for Claude Code,
-  `"preferredNotifChannel": "iterm2"` in `~/.claude/settings.json`). It costs nothing inside Herdr
-  and it means the same agent still notifies correctly on the days you run it in a bare terminal.
+  `"preferredNotifChannel": "iterm2_with_bell"` in `~/.claude/settings.json`). It costs nothing
+  inside Herdr and it means the same agent still notifies correctly on the days you run it in a
+  bare terminal — the OSC 9 half feeds Ghostty, the bell half feeds terminals that never parse
+  OSC 9, such as Zed's Terminal Threads.
 
 ## Troubleshooting
 

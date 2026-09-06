@@ -29,7 +29,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   implementation specs stay out of version control without becoming invisible to coding agents.
 - Initial public documentation: the no-symlink delivery model, what is in scope for this repo and
   what deliberately stays private, and a guide to getting reliable "agent finished" notifications
-  when running coding agents inside Herdr on macOS.
+  when running coding agents inside Herdr on macOS — with a Claude Code channel
+  (`iterm2_with_bell`) that also reaches terminals that only listen for the bell, such as Zed's
+  Terminal Threads.
 - Manual setup guide (`docs/manual-setup.md`), the single place to look after cloning: every step
   that has to be done by hand, in order, each with a command to verify it worked and a command to
   undo it. It covers the steps no installer will ever take over — agent logins, provider API keys,
