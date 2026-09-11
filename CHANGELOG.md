@@ -16,6 +16,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   repo directory is Yazi's config directory, so there is no machine-local override file for it.
   Re-run `./setup.sh` (installs Yazi and restores its two plugins) then `./install.sh`, and open a
   new shell. Yazi 25 or newer is required for the opener syntax.
+- Decision record `docs/decisions/0010-export-a-config-directory-variable-from-zshenv.md`,
+  recording why Yazi is pointed at the repo through an environment variable in `~/.zshenv` rather
+  than an include stub or a byte copy, and what that costs.
 - `Brewfile`: `yazi` and `glow`, the tools Yazi previews through (`fd`, `ripgrep`, `fzf`,
   `zoxide`, `poppler`, `ffmpeg`, `imagemagick`, `jq`, `sevenzip`, `resvg`), and the
   `font-symbols-only-nerd-font` cask that Zed's terminal needs for Yazi's icons; Ghostty has them

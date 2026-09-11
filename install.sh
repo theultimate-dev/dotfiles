@@ -8,6 +8,7 @@
 # Destinations:
 #   ~/.config/git/config              [include] path = <repo>/git/.gitconfig
 #   ~/.config/ghostty/config.ghostty  config-file = <repo>/ghostty/config.ghostty
+#   ~/.zshenv                         export YAZI_CONFIG_HOME=<repo>/yazi
 #
 # Flags:
 #   --dry-run   Show planned actions without modifying any files.
@@ -48,6 +49,7 @@ Place configuration stubs into destination files without symlinks.
 Destinations:
   ~/.config/git/config              include of <repo>/git/.gitconfig
   ~/.config/ghostty/config.ghostty  include of <repo>/ghostty/config.ghostty
+  ~/.zshenv                         export of YAZI_CONFIG_HOME=<repo>/yazi
 
 Options:
   --dry-run   Show what would be changed without touching any files
@@ -234,6 +236,7 @@ apply_block() {
 }
 
 XDG_CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}"
+NL=$'\n'
 
 # ── 1. Git configuration ───────────────────────────────────────────────────
 step "Git configuration"
@@ -313,7 +316,6 @@ fi
 # Both paths land unquoted in a config-file value. Ghostty offers no escaping
 # this script can rely on for these characters, so refuse rather than guess.
 # A mid-path '#' is fine: Ghostty accepts it inside a value.
-NL=$'\n'
 for p in "$DOTFILES" "$GHOSTTY_LOCAL"; do
   case "$p" in
     *'"'*|*'\'*|*"$NL"*|[[:space:]]*|*[[:space:]])
@@ -349,6 +351,54 @@ EOT
 )"
 
 apply_block "$GHOSTTY_CONFIG" "$GHOSTTY_BLOCK_CONTENT" prepend
+
+# ── 3. Yazi configuration ─────────────────────────────────────────────────
+step "Yazi configuration"
+
+# Yazi has no include directive, but it reads its config directory from
+# YAZI_CONFIG_HOME. The repo directory is that directory; the export is the
+# redirect. It goes in ~/.zshenv because every zsh reads that file, login or
+# not, so a Yazi started from Ghostty, Zed's terminal or a Herdr pane sees it
+# — and because ~/.zshrc belongs to whichever repo manages the shell.
+# zsh reads $ZDOTDIR/.zshenv when ZDOTDIR is exported, ~/.zshenv otherwise.
+ZSHENV="${ZDOTDIR:-$HOME}/.zshenv"
+YAZI_DIR="$DOTFILES/yazi"
+
+# Symlink check: refuse to write through a symlink
+if [[ -L "$ZSHENV" ]]; then
+  err "$ZSHENV is a symlink. Refusing to modify."
+  exit 1
+fi
+
+# Environment checks
+if [[ -n "${ZDOTDIR:-}" ]]; then
+  warn "ZDOTDIR is set; writing $ZSHENV, which zsh reads instead of ~/.zshenv"
+fi
+if [[ -n "${YAZI_CONFIG_HOME:-}" && "$YAZI_CONFIG_HOME" != "$YAZI_DIR" ]]; then
+  warn "YAZI_CONFIG_HOME is already $YAZI_CONFIG_HOME; whatever exports it after ~/.zshenv wins over this block"
+fi
+
+# The path lands inside a single-quoted zsh string, where only a quote or a
+# newline cannot be embedded. Refuse rather than escape.
+case "$DOTFILES" in
+  *"'"*|*"$NL"*)
+    err "cannot embed '$DOTFILES' in a single-quoted zsh string (quote or newline). Move the clone."
+    exit 1
+    ;;
+esac
+
+# Appended, not prepended: in a shell the last export wins, and an override
+# typed below this block by hand survives every re-run.
+ZSHENV_BLOCK_CONTENT="$(cat <<EOT
+$BEGIN_MARKER
+# Yazi has no include directive; it reads the directory named here instead.
+# Every zsh reads ~/.zshenv, so a Yazi started from any zsh sees the repo.
+export YAZI_CONFIG_HOME='$YAZI_DIR'
+$END_MARKER
+EOT
+)"
+
+apply_block "$ZSHENV" "$ZSHENV_BLOCK_CONTENT" append
 
 # ── Summary ────────────────────────────────────────────────────────────────
 if [[ "$CHECK" -eq 1 ]]; then
