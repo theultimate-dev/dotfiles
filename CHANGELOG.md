@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `install.sh`: automated, offline configuration placement script depending strictly on macOS system
+  bash 3.2 and coreutils. Manages destination include stubs using named delimited blocks (`# BEGIN
+  dotfiles (public)` ... `# END dotfiles (public)`), with atomic temp-file writes, pre-modification
+  backups in `~/.dotfiles-backup/`, an empty `~/.gitconfig` creation guard, and non-destructive
+  `--dry-run` and `--check` drift detection.
+- Decision record `docs/decisions/0006-manage-shared-destinations-with-delimited-blocks.md`,
+  documenting why shared destination files are managed through named delimited blocks rather than
+  symlinks, wholesale rewrites, or single-sentinel schemes.
 - `Brewfile` and `setup.sh` to install daily macOS development tools and coding agents via Homebrew
   (Ghostty, Zed, Herdr, T3 Code, OpenAI Codex, GitHub Copilot CLI, Google Antigravity CLI, and xAI
   Grok Build), plus automated installation for Herdr session identity integrations. An app
@@ -56,6 +64,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   integrations and the post-install notes still run for what did install, and the script exits
   non-zero at the end instead of stopping at the failed package.
 - `setup.sh` silences Homebrew's environment hints for its own run, so its output is shorter.
+- `README.md` now opens with a Quick Start — clone, `./setup.sh`, `./install.sh`, and a pointer
+  to the manual steps — and documents `install.sh` with its `--dry-run` and `--check` flags now
+  that it has landed.
+- `docs/manual-setup.md` pruned temporary step 4 (Git push defaults), as it is now automated by
+  `install.sh`, and updated subsequent step numbering and verification commands.
+- `docs/git-push-defaults.md` updated activation instructions to run `./install.sh`.
 - `AGENTS.md` no longer describes git configuration as a shared `~/.gitconfig` owned through
   BEGIN/END sentinel blocks. That scheme was superseded when the repo moved to including from
   `~/.config/git/config`, and the invariant, the precedence table and the machine-local override

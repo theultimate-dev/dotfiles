@@ -229,17 +229,17 @@ git --version
 macOS ships a recent enough git on any currently supported release, and `brew install git` is well
 ahead of it. The version to worry about is a machine that has been carried forward for years.
 
-## Activating it today
+## Activation
 
-`install.sh` has not landed, so this is installed by hand — as an include directive in
-`${XDG_CONFIG_HOME:-$HOME/.config}/git/config`, and never by writing `~/.gitconfig`. That direction
+Run `./install.sh` from the repository root. It writes the include directive into
+`${XDG_CONFIG_HOME:-$HOME/.config}/git/config`, and never writes `~/.gitconfig`. That direction
 is structure rather than politeness: git reads the XDG file *before* `~/.gitconfig` and the last
 value wins, so this repo is a defaults layer that anything of your own overrides automatically,
 without either file knowing about the other.
 
-The steps themselves — snapshot, include, verify, roll back — are
-[step 4 of the manual setup guide](manual-setup.md#4-git-push-defaults), the only page here that
-carries commands you run by hand.
+`install.sh` places this include stub inside a named delimited block with pre-modification backups
+and atomic writes — see
+[ADR 0006](decisions/0006-manage-shared-destinations-with-delimited-blocks.md).
 
 ## Reference
 

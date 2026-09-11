@@ -3,14 +3,39 @@
 My macOS development stack, shared publicly: shell, terminal, git, runtimes, and the tooling that
 holds them together.
 
+## Quick Start
+
+Set up your macOS development environment in three steps:
+
+1. **Clone the repository:**
+   ```sh
+   git clone https://github.com/theultimate-dev/dotfiles.git
+   cd dotfiles
+   ```
+
+2. **Install tools and packages** (Homebrew, casks, CLI agents, Herdr hooks):
+   ```sh
+   ./setup.sh
+   ```
+
+3. **Place configuration stubs** (atomic, safe, no symlinks):
+   ```sh
+   ./install.sh
+   ```
+
+> **Interactive logins & secrets:** Browser logins (Codex, Copilot, Grok, AGY) and provider API keys
+> cannot be scripted. Follow [Manual setup](docs/manual-setup.md) for the remaining one-time steps.
+
+---
+
 **No symlinks.** Not one. See [How configs are delivered](#how-configs-are-delivered).
 
-**Included, never installed over your git config.** The installer will own one named block in
+**Included, never installed over your git config.** The installer owns one named block in
 `~/.config/git/config`; it will never write your `~/.gitconfig`. See
 [why that is structural, not a convention](#included-never-installed-over-your-git-config).
 
-> **Status:** this repo is being built in the open. Documentation lands first; the installer and the
-> configuration follow. [`CHANGELOG.md`](CHANGELOG.md) tracks what has arrived.
+> **Status:** this repo is being built in the open. Tool installation and git defaults are live;
+> shell and terminal configs follow. [`CHANGELOG.md`](CHANGELOG.md) tracks what has arrived.
 
 ## Platform
 
@@ -74,14 +99,15 @@ internalizing before editing anything here.
 This is the second promise, and it is the one that matters if you already have a git configuration
 you care about.
 
-`install.sh` has not landed. When it does, it will own exactly one destination for git —
-`~/.config/git/config`, strictly `${XDG_CONFIG_HOME:-$HOME/.config}/git/config` — where it will
-write a named, delimited block and preserve every other byte of that file.
+`install.sh` owns exactly one destination for git —
+`~/.config/git/config`, strictly `${XDG_CONFIG_HOME:-$HOME/.config}/git/config` — where it
+writes a named, delimited block (`# BEGIN dotfiles (public)` ... `# END dotfiles (public)`)
+and preserves every other byte of that file.
 
 It will never write `~/.gitconfig`. That is where essentially everyone keeps their identity, their
 aliases, and years of accumulated settings, and this repo has no business editing it. There is one
 exception, and it is a create rather than an overwrite: if you have no `~/.gitconfig` at all, the
-installer will create an empty one. Without it, git's `--global` *write* target becomes the XDG
+installer creates an empty one. Without it, git's `--global` *write* target becomes the XDG
 file, and the next `git config --global …` you run would put your identity inside a file this repo
 manages.
 
@@ -95,9 +121,8 @@ The same mechanism is what lets a second, private dotfiles repo coexist. It keep
 this one keeps the XDG file, and neither installer reads or writes the other's destination: no
 sentinel to agree on, no install-order dependency.
 
-Until `install.sh` lands, activation is manual: one `[include]` appended to the XDG git config.
-[Manual setup, step 4](docs/manual-setup.md#4-git-push-defaults) has the command, the check that
-proves it took effect, and the way to undo it.
+`install.sh` writes this include stub automatically with pre-modification backups and atomic writes.
+See [ADR 0006](docs/decisions/0006-manage-shared-destinations-with-delimited-blocks.md).
 
 ## Installation
 
@@ -105,26 +130,25 @@ Installation follows the two-script split:
 
 ```sh
 ./setup.sh     # installs tools: Homebrew, runtimes, anything touching the network
-./install.sh   # places config: writes the stubs above, and nothing else (not yet landed)
+./install.sh   # places config: writes native stubs atomically (offline, no symlinks)
 ```
 
-**Until `install.sh` lands, configuration is placed by hand** — see
-[Manual setup](docs/manual-setup.md). It is the only page here that contains commands you run
-yourself: every step in order, each with a way to check it worked and a way to undo it. Several of
-those steps stay manual no matter what the installer does, because no script can complete an OAuth
-login or type an API key on your behalf.
+The split exists so that config placement never depends on the network and stays debuggable on a
+half-broken machine.
 
 `setup.sh` installs the daily tools via Homebrew (Ghostty, Zed, T3 Code, Herdr, and coding agent
 CLIs) and configures Herdr agent integrations. Re-running it is safe and convergent. An app you
 installed by hand before is left alone and reported; `./setup.sh --adopt` hands it to Homebrew,
 after explaining the macOS permission prompt that needs.
 
-The split exists so that config placement never depends on the network and stays debuggable on a
-half-broken machine. `install.sh` will land in a subsequent change; it will support `--dry-run` to
-show exactly what it would change and `--check` to report drift without touching anything.
+`install.sh` places configuration stubs using native include directives and named delimited blocks.
+It supports two non-destructive flags:
 
-Watch [`CHANGELOG.md`](CHANGELOG.md) for when it lands. The steps it takes over are listed at the
-end of [Manual setup](docs/manual-setup.md#what-the-installer-will-take-over).
+- `./install.sh --dry-run` — preview planned changes without modifying any files.
+- `./install.sh --check` — verify drift against expected stubs; exits 0 if current, 1 if drifted.
+
+Interactive steps (agent OAuth logins, API keys, and notification permissions) remain manual —
+see [Manual setup](docs/manual-setup.md).
 
 ## Repository layout
 
@@ -135,6 +159,7 @@ end of [Manual setup](docs/manual-setup.md#what-the-installer-will-take-over).
 | [`CHANGELOG.md`](CHANGELOG.md) | Every notable change, newest first |
 | [`Brewfile`](Brewfile) | Declarative package list installed via Homebrew |
 | [`setup.sh`](setup.sh) | Tool installation and Herdr agent integration script |
+| [`install.sh`](install.sh) | Configuration placement script (atomic writes, no symlinks) |
 | `git/` | Managed git configuration |
 | [`LICENSE`](LICENSE) | MIT — see [Licence and scope](#licence-and-scope) |
 | `docs/` | Deep dives on the pieces whose reasoning is not obvious from the code |

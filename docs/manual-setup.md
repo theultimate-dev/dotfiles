@@ -12,21 +12,20 @@ expands it for you.
 
 ## Before you start
 
-macOS only. Step 4 additionally needs **git 2.37 or newer** — check with `git --version`, because on
-older git the settings it activates are silently inert.
+macOS only. Git push defaults additionally need **git 2.37 or newer** — check with `git --version`,
+because on older git the settings `install.sh` activates are silently inert.
 
-**What gets written.** Four files outside this repo, and nothing else. No step creates a symlink,
+**What gets written.** Three files outside this repo, and nothing else. No step creates a symlink,
 and no step overwrites a file wholesale:
 
 | Path | Step | Action | Present today? |
 |---|---|---|---|
-| `~/.config/git/config` | 4 | created, or appended to | usually absent |
-| `~/.config/herdr/config.toml` | 5 | created, or edited | absent until Herdr first runs |
-| `~/.claude/settings.json` | 5 | one key added | present if Claude Code is installed |
-| `~/.grok/config.toml` | 7 | edited only if the collision fires | conditional |
+| `~/.config/herdr/config.toml` | 4 | created, or edited | absent until Herdr first runs |
+| `~/.claude/settings.json` | 4 | one key added | present if Claude Code is installed |
+| `~/.grok/config.toml` | 6 | edited only if the collision fires | conditional |
 
 Steps 1 to 3 also install software and write credentials, but only into each tool's own
-configuration directory. Steps 2, 3 and 6 are interactive — a browser login, a settings pane — and
+configuration directory. Steps 2, 3 and 5 are interactive — a browser login, a settings pane — and
 have no terminal equivalent.
 
 **Snapshot.** Do this once, before step 1. It is the difference between "I changed something" and
@@ -35,7 +34,7 @@ have no terminal equivalent.
 ```sh
 mkdir -p ~/.dotfiles-backup
 
-for f in ~/.config/git/config ~/.config/herdr/config.toml ~/.claude/settings.json ~/.grok/config.toml; do
+for f in ~/.config/herdr/config.toml ~/.claude/settings.json ~/.grok/config.toml; do
   if [ -e "$f" ]; then
     cp -p "$f" ~/.dotfiles-backup/"$(printf '%s' "${f#$HOME/.}" | tr / -)"
     echo "saved:  $f"
@@ -67,27 +66,30 @@ known-good state than from a half-applied one.
 the file outright if the loop above reported it absent. Each step below names its own.
 
 **Order.** Steps 1 to 3 run in sequence — you cannot log in to a tool that is not installed yet.
-Steps 4 to 7 are independent of each other and of the first three: run them in any order, or skip
-the ones you do not want. (Steps 5 and 7 configure tools that step 1 installs; if you skipped step 1
+Steps 4 to 6 are independent of each other and of the first three: run them in any order, or skip
+the ones you do not want. (Steps 4 and 6 configure tools that step 1 installs; if you skipped step 1
 there is simply nothing there to configure.)
 
 ---
 
-## 1. Install the tools
+## 1. Install the tools and place configs
 
 **What you get.** Homebrew plus every tool the rest of this guide configures — Ghostty, Zed, Herdr,
 T3 Code, `terminal-notifier`, and the coding agent CLIs — installed and on `$PATH`, with Herdr's
-session-identity integration registered for each agent whose config directory already exists.
+session-identity integration registered for each agent whose config directory already exists, and
+configuration stubs placed atomically via `./install.sh`.
 
 **Do this.**
 
 ```sh
 cd <repo>
 ./setup.sh
+./install.sh
 ```
 
-Re-running is safe and convergent: it upgrades what Homebrew manages, leaves applications you had
-installed by hand alone, and skips integrations already marked current.
+Re-running is safe and convergent: `setup.sh` upgrades what Homebrew manages, leaves applications
+you had installed by hand alone, and skips integrations already marked current. `install.sh`
+verifies and maintains native include stubs without touching existing user configurations.
 
 **Already have Ghostty, Zed or T3 Code in `/Applications`?** `setup.sh` lists an app it did not
 install, leaves it alone, and installs everything else. To hand those apps over to Homebrew:
@@ -107,10 +109,12 @@ would otherwise have cost you, is in
 
 ```sh
 brew bundle check --file=<repo>/Brewfile
+./install.sh --check
 ```
 
 ```
 The Brewfile's dependencies are satisfied.
+Check passed: all managed stubs are current.
 ```
 
 An app `setup.sh` skipped shows up in the first check as missing until you adopt it. That is the
@@ -131,6 +135,7 @@ took over. To have it outside Homebrew again, reinstall it from the vendor's dow
 **Why it works this way.** Homebrew is the single installer of record because the vendors' curl
 scripts rewrite `~/.zshrc` and symlink into `$HOME` — see
 [Agent tooling and installation](agent-tooling.md#why-vendor-curl-installers-were-rejected).
+Configuration placement is kept strictly offline in `install.sh` to adhere to the two-script split.
 
 ---
 
@@ -199,65 +204,7 @@ is documented here rather than managed — see
 
 ---
 
-## 4. Git push defaults
-
-> **Temporary.** `install.sh` will do this for you; this section is deleted when it lands.
-
-**What you get.** `git push` on a branch you created from `origin/main` creates the matching remote
-branch and tracks it, instead of failing with a name mismatch or offering to push onto `main`.
-
-**Do this.** One file, appended once. Replace `<repo>` with the absolute path of your clone:
-
-```sh
-mkdir -p ~/.config/git
-cat >> ~/.config/git/config <<'EOF'
-[include]
-	path = <repo>/git/.gitconfig
-EOF
-```
-
-That include is the entire installation. What it pulls in is `git/.gitconfig` in this repo, which
-remains the only place the settings themselves are written down.
-
-**Verify.**
-
-```sh
-git config --show-origin --get push.autoSetupRemote
-```
-
-```
-file:<repo>/git/.gitconfig	true
-```
-
-`--show-origin` is the point: it names the file the value came from, which proves the include is
-live rather than that the value happens to be set somewhere else. The same check works for
-`push.default` and `branch.autoSetupMerge`. If the origin names some other file, a higher-precedence
-layer is winning.
-
-**Undo.** If the snapshot loop reported `~/.config/git/config` absent, delete it:
-
-```sh
-rm ~/.config/git/config
-```
-
-Otherwise restore the copy you took, which keeps everything else in that file intact:
-
-```sh
-cp -p ~/.dotfiles-backup/config-git-config ~/.config/git/config
-```
-
-Either way the Verify command then prints nothing and exits 1.
-
-**Why it works this way.** Git reads `~/.config/git/config` before `~/.gitconfig` and the last value
-wins, so this repo is a defaults layer that anything of your own overrides — see
-[git push defaults](git-push-defaults.md) and
-[the README's git delivery promise](../README.md#included-never-installed-over-your-git-config).
-
----
-
-## 5. Herdr notifications
-
-> **Temporary.** `install.sh` will do this for you; this section is deleted when it lands.
+## 4. Herdr notifications
 
 **What you get.** A macOS banner when an agent in any Herdr pane finishes or needs input, carrying
 your terminal's icon, with a click that raises the terminal and `prefix+g` that jumps to the pane
@@ -351,9 +298,9 @@ never reaches the terminal and `delivery = "system"` is what replaces it — see
 
 ---
 
-## 6. Grant the macOS notification permission
+## 5. Grant the macOS notification permission
 
-**What you get.** The banners from step 5 actually appear. Until this is granted, everything is
+**What you get.** The banners from step 4 actually appear. Until this is granted, everything is
 configured correctly and nothing shows up, which is the most confusing failure in this guide.
 
 **Do this.**
@@ -366,7 +313,7 @@ Find **terminal-notifier** in the application list and turn **Allow Notification
 for Ghostty if you ever switch a machine to `delivery = "terminal"`.
 
 The entry only appears once something has tried to notify at least once, so if it is missing, run
-the live test from step 5 and look again.
+the live test from step 4 and look again.
 
 **Verify.**
 
@@ -386,7 +333,7 @@ Herdr's — see
 
 ---
 
-## 7. Known collisions to check
+## 6. Known collisions to check
 
 Conditional. Do each of these only if its check fires. `setup.sh` detects the first and warns;
 neither touches a file this repo manages, which is why neither is fixed for you.
@@ -443,27 +390,22 @@ them instead of acting — see
 
 ---
 
-## What the installer will take over
+## What the installer has taken over
 
-`install.sh` has not landed. When it does, it absorbs exactly two of the steps above, and deleting
-them is part of that change rather than a follow-up:
-
-| Delete | Because `install.sh` will | Also prune |
-|---|---|---|
-| [4. Git push defaults](#4-git-push-defaults) | write the `[include]` into `~/.config/git/config` | its row in [Before you start](#before-you-start) |
-| [5. Herdr notifications](#5-herdr-notifications) | write `~/.config/herdr/config.toml` and the Claude Code notification key | its rows in [Before you start](#before-you-start) |
-
-Then delete this section. The two **Temporary** markers go with the sections they head.
+`install.sh` has landed. It automates Git push defaults by writing the `[include]` into
+`${XDG_CONFIG_HOME:-~/.config}/git/config` with pre-modification backups, delimited blocks, and
+`--check` drift detection.
 
 The rest stays, and stays here:
 
 | Step | Why no installer takes it over |
 |---|---|
-| [1. Install the tools](#1-install-the-tools) | the installer's other half: `setup.sh` needs the network, `install.sh` may not |
+| [1. Install the tools and place configs](#1-install-the-tools-and-place-configs) | the two-script split: `setup.sh` needs the network, `install.sh` may not |
 | [2. Authenticate the coding agents](#2-authenticate-the-coding-agents) | interactive OAuth; nothing types a password into a browser for you |
 | [3. Configure T3 Code](#3-configure-t3-code) | provider API keys are secrets, and this repo ships none |
-| [6. Grant the macOS notification permission](#6-grant-the-macos-notification-permission) | a GUI toggle only you can flip |
-| [7. Known collisions to check](#7-known-collisions-to-check) | detection is automatable; the remedy edits files this repo does not manage |
+| [4. Herdr notifications](#4-herdr-notifications) | Herdr has no include mechanism; agent settings unmanaged per ADR 0005 |
+| [5. Grant the macOS notification permission](#5-grant-the-macos-notification-permission) | a GUI toggle only you can flip |
+| [6. Known collisions to check](#6-known-collisions-to-check) | detection is automatable; the remedy edits files this repo does not manage |
 
 One rule outlives the prune: **a command that writes to `$HOME` appears exactly once in this
 repository.** If a procedure ever comes back out of `install.sh`, it comes back to this file — not
