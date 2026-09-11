@@ -209,9 +209,9 @@ is documented here rather than managed — see
 
 ## 4. Herdr notifications
 
-**What you get.** A macOS banner when an agent in any Herdr pane finishes or needs input, carrying
-your terminal's icon, with a click that raises the terminal and `prefix+g` that jumps to the pane
-behind it.
+**What you get.** A macOS notification when an agent in any Herdr pane finishes or needs input,
+carrying your terminal's icon, with a click that raises the terminal and `prefix+g` that jumps to
+the pane behind it. Step 5 is what makes it stay on screen.
 
 **Do this.** Three parts. First, Herdr's own configuration:
 
@@ -261,6 +261,9 @@ If `~/.claude/settings.json` already exists, add `"preferredNotifChannel": "iter
 its top-level object by hand and leave everything else alone — including the `SessionStart` hook
 Herdr put there.
 
+Zed needs no step of its own: its Terminal Threads key their popup on that bell with Zed's default
+settings — see [One agent setting, three hosts](herdr-notifications.md#one-agent-setting-three-hosts).
+
 **Verify.**
 
 ```sh
@@ -280,9 +283,9 @@ Then the live test, which needs the Herdr server running:
 herdr notification show "test" --body "hello" --sound done
 ```
 
-A banner appears carrying your terminal's icon. If no banner appears at all, do step 6. If the icon
-is a script or scroll and clicking it opens Finder, `terminal-notifier` is missing — go back to
-step 1.
+A notification appears carrying your terminal's icon; until step 5 is done it leaves again after a
+few seconds. If nothing appears at all, do step 5. If the icon is a script or scroll and clicking it
+opens Finder, `terminal-notifier` is missing — go back to step 1.
 
 **Undo.**
 
@@ -301,10 +304,12 @@ never reaches the terminal and `delivery = "system"` is what replaces it — see
 
 ---
 
-## 5. Grant the macOS notification permission
+## 5. Allow notifications and make them stay on screen
 
-**What you get.** The banners from step 4 actually appear. Until this is granted, everything is
-configured correctly and nothing shows up, which is the most confusing failure in this guide.
+**What you get.** The notifications from step 4 actually appear, and they stay on screen until you
+dismiss them instead of leaving after a few seconds. Until the first toggle is on, everything is
+configured correctly and nothing shows up; until the second, a banner shows and is gone before you
+look up. Both are the most confusing failures in this guide.
 
 **Do this.**
 
@@ -312,27 +317,44 @@ configured correctly and nothing shows up, which is the most confusing failure i
 open "x-apple.systempreferences:com.apple.Notifications-Settings.extension"
 ```
 
-Find **terminal-notifier** in the application list and turn **Allow Notifications** on. Do the same
-for Ghostty if you ever switch a machine to `delivery = "terminal"`.
+Find **terminal-notifier** in the application list, turn **Allow Notifications** on, and set
+**Alert style** to **Persistent** (older macOS versions call it **Alerts**). Then do both for
+**Ghostty**, which is the sender on the days you run an agent outside Herdr.
 
-The entry only appears once something has tried to notify at least once, so if it is missing, run
-the live test from step 4 and look again.
+An entry only appears once the app has tried to notify at least once. If `terminal-notifier` is
+missing, run the live test from step 4 and look again; if Ghostty is missing, run this in a Ghostty
+pane that is not inside Herdr, switch to another app for a moment, and look again:
+
+```sh
+sleep 3; printf '\e]9;dotfiles\a'
+```
 
 **Verify.**
 
 ```sh
+terminal-notifier -diagnose | grep -E 'authorization|alert style'
 terminal-notifier -title "dotfiles" -message "notification permission check"
 ```
 
-A banner appears in the corner of the screen. The banner is the output — the terminal is not where
-to look. No banner means the permission is still off.
+```
+  authorization       authorized
+  alert style         alerts (stay until dismissed)
+```
 
-**Undo.** Turn **Allow Notifications** back off for `terminal-notifier` in the same pane.
+The notification is the output — the terminal is not where to look. It stays in the corner of the
+screen until you dismiss it. No notification means the permission is still off; one that leaves on
+its own means the style is still Temporary, and the diagnose line still says `banners`.
 
-**Why it works this way.** Herdr posts through `terminal-notifier` so the banner gets the right icon
-and click target, which is why the permission macOS asks about is `terminal-notifier`'s rather than
-Herdr's — see
-[Herdr notifications](herdr-notifications.md#why-terminal-notifier-is-not-optional-in-practice).
+**Undo.** Set **Alert style** back to **Temporary**, or turn **Allow Notifications** off, in the
+same pane.
+
+**Why it works this way.** Herdr posts through `terminal-notifier` so the notification gets the
+right icon and click target, which is why the permission and the style macOS asks about are
+`terminal-notifier`'s rather than Herdr's — see
+[Why terminal-notifier is not optional](herdr-notifications.md#why-terminal-notifier-is-not-optional-in-practice).
+The style itself is a per-app choice macOS keeps in a private preference file, which is why no
+installer sets it — see
+[Making a notification stay on screen](herdr-notifications.md#making-a-notification-stay-on-screen).
 
 ---
 
@@ -409,7 +431,7 @@ The rest stays, and stays here:
 | [2. Authenticate the coding agents](#2-authenticate-the-coding-agents) | interactive OAuth; nothing types a password into a browser for you |
 | [3. Configure T3 Code](#3-configure-t3-code) | provider API keys are secrets, and this repo ships none |
 | [4. Herdr notifications](#4-herdr-notifications) | Herdr has no include mechanism; agent settings unmanaged per ADR 0005 |
-| [5. Grant the macOS notification permission](#5-grant-the-macos-notification-permission) | a GUI toggle only you can flip |
+| [5. Allow notifications and make them stay on screen](#5-allow-notifications-and-make-them-stay-on-screen) | two GUI toggles only you can flip |
 | [6. Known collisions to check](#6-known-collisions-to-check) | detection is automatable; the remedy edits files this repo does not manage |
 
 One rule outlives the prune: **a command that writes to `$HOME` appears exactly once in this

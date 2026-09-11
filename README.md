@@ -188,7 +188,9 @@ see [Manual setup](docs/manual-setup.md).
   finished" notifications when running coding agents inside [Herdr](https://herdr.dev) in
   [Ghostty](https://ghostty.org). A multiplexer swallows the escape sequence your agent emits, so
   the terminal-side setup you already have goes quiet; this covers what to configure instead, why
-  `delivery = "system"` beats the intuitive choice, and when it doesn't.
+  `delivery = "system"` beats the intuitive choice, and when it doesn't. Also: the one macOS toggle
+  that makes a notification stay on screen, what the badge on Ghostty's Dock icon is, and how the
+  same Claude Code setting reaches Zed's Terminal Threads.
 
 ## Conventions
 

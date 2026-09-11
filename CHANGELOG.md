@@ -16,6 +16,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `~/.config/ghostty/config.ghostty`; machine-local overrides go in
   `~/.config/ghostty/local.ghostty`, which that block includes last. Re-run `./install.sh` to get
   it; Ghostty 1.2.3 or newer is required for the file name.
+- Decision record `docs/decisions/0008-keep-one-agent-notification-channel-across-hosts.md`,
+  recording why `iterm2_with_bell` stays the only Claude Code notification setting across Zed,
+  Ghostty and Herdr, why persistence is left to the macOS alert style, and which alternatives lost.
 - Decision record `docs/decisions/0009-insert-the-ghostty-block-first.md`, recording why the
   Ghostty include block goes first in the destination file: Ghostty applies every `config-file`
   after the whole file, in order, later file wins.
@@ -72,6 +75,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `install.sh` matches its block markers as whole lines, refuses a destination that carries only
   one of the two markers instead of appending a second block, and keeps a destination's file
   permissions when it updates a block in place.
+- The Herdr notifications guide and the manual setup now cover making a notification stay on
+  screen (the per-app Persistent alert style in System Settings, which no installer can set), what
+  the number on Ghostty's Dock icon is, and how the same Claude Code setting reaches Zed's
+  Terminal Threads with no Zed-side setup. The manual setup's live test no longer points at the
+  wrong step when nothing appears.
 - `setup.sh` no longer lets Homebrew adopt an app you installed by hand. Such apps are listed and
   skipped; `./setup.sh --adopt` opts in, names the macOS App Management dialog and the possible
   password prompt first, and stops before `brew bundle` if the permission is refused, so

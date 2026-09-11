@@ -3,7 +3,7 @@
 How to get reliable "your agent finished" notifications when you run coding agents inside
 [Herdr](https://herdr.dev) in [Ghostty](https://ghostty.org).
 
-Verified against **Herdr 0.8.x** and **Ghostty 1.3** on macOS.
+Verified against **Herdr 0.9.0**, **Ghostty 1.3.1** and **terminal-notifier 3.1** on macOS 26.
 
 ## The problem this solves
 
@@ -143,6 +143,40 @@ Worth knowing so you can tell "configured wrong" from "working as designed":
 - **`delay_seconds`** (default `1`) swallows state changes shorter than the delay, so a fast tool
   call does not flash a banner at you.
 
+## Making a notification stay on screen
+
+macOS, not Herdr, decides how long a notification stays. Every sender app has an **Alert style** in
+System Settings → Notifications: *Temporary*, a banner that leaves after a few seconds and is the
+default, or *Persistent*, which stays until you dismiss it (older macOS versions call it *Alerts*).
+Herdr's notifications are posted by `terminal-notifier`, so that is the app whose style matters;
+Ghostty's own style matters on the days you run an agent in a bare terminal. Until you flip it,
+everything is configured correctly and the banner is simply gone before you look up — the symptom
+is "nothing happened", not an error.
+[Step 5 of the manual setup guide](manual-setup.md#5-allow-notifications-and-make-them-stay-on-screen)
+has the click path and the check.
+
+Why this is a hand step and not part of `install.sh`: the setting lives in `com.apple.ncprefs`, a
+private property list whose per-app flags are an undocumented bitfield that only takes effect once
+the notification daemon restarts. A script writing it would be guessing, and nothing could tell a
+scripted flag from your own choice afterwards.
+
+One thing Persistent does not change: while Ghostty is focused it dismisses a notification raised
+through `OSC 9` after three seconds, whatever the alert style. `terminal-notifier` posts through
+its own app, so Ghostty's focus has no say — one more reason `"system"` beats `"terminal"` here.
+
+## The number on the Dock icon
+
+The badge is not a notification, and Herdr did not send it. Claude Code's `iterm2_with_bell`
+channel rings the terminal bell next to the OSC 9, Herdr forwards every bell from a pane to the
+outer terminal, and Ghostty's default `bell-features` (`attention,title`) bounces the Dock icon and
+counts bells while the window is unfocused. When the alert style is Temporary, that count is the
+only trace that survives, which is why it looks as if the badge is all you get.
+
+The bell stays on: it is what Zed's Terminal Threads key their popup on. If the badge is noise once
+alerts are Persistent, `bell-features = no-attention` in your Ghostty configuration keeps the
+notification and drops the bounce and the badge (`no-title` also drops the 🔔 in the tab title).
+The repo's [`ghostty/config.ghostty`](../ghostty/config.ghostty) carries that line commented out.
+
 ## Sounds
 
 ```toml
@@ -178,7 +212,23 @@ Two things follow:
   `"preferredNotifChannel": "iterm2_with_bell"` in `~/.claude/settings.json`). It costs nothing
   inside Herdr and it means the same agent still notifies correctly on the days you run it in a
   bare terminal — the OSC 9 half feeds Ghostty, the bell half feeds terminals that never parse
-  OSC 9, such as Zed's Terminal Threads.
+  OSC 9, such as Zed's Terminal Threads. The channels that were rejected, and why, are in
+  [ADR 0008](decisions/0008-keep-one-agent-notification-channel-across-hosts.md).
+
+## One agent setting, three hosts
+
+The same `iterm2_with_bell` value is what makes Claude Code notify correctly wherever it runs. What
+differs is who turns the emitted sequence into something you see:
+
+| Host | Claude Code emits | What you see | Sender in System Settings | Stays on screen |
+| --- | --- | --- | --- | --- |
+| Zed Terminal Threads | BEL; the OSC 9 is ignored | Zed's own popup with a **View** button, when the thread is unfocused; `agent.notify_when_agent_waiting` (default `primary_screen`) governs it | none — Zed draws it | Yes, until dismissed |
+| Bare Ghostty | OSC 9 and BEL | Ghostty raises a macOS notification from the OSC 9 (`desktop-notifications = true`); suppressed while the pane is focused, dismissed after 3 s while the window is focused. The bell bounces the Dock icon | Ghostty | Only with Ghostty's style set to Persistent, and only while unfocused |
+| Herdr in Ghostty | OSC 9, swallowed by Herdr; BEL, forwarded | Herdr detects the pane state and posts through `terminal-notifier -activate`; the forwarded bell becomes the Dock badge | terminal-notifier | Only with terminal-notifier's style set to Persistent |
+
+Nothing needs configuring on the Zed side. `terminal.bell` defaults to `off` and only controls the
+audible sound; the popup does not depend on it. Claude Code's `auto` channel keys on
+`TERM_PROGRAM` and sends nothing under Zed — the bell is the whole reason for `iterm2_with_bell`.
 
 ## Troubleshooting
 
@@ -188,6 +238,8 @@ Two things follow:
 | No notifications at all while the terminal is focused | `delivery = "terminal"` + the outer terminal's focus suppression. Switch to `"system"` |
 | Notifications vanish when several agents finish at once | Ghostty's 1/sec rate limit on `"terminal"` delivery. Switch to `"system"` |
 | Nothing fires anywhere | Notification permission not granted for `terminal-notifier` (or your terminal) in System Settings |
+| A banner appears, then vanishes after a few seconds | Alert style is Temporary for the sender app — `terminal-notifier` under Herdr, Ghostty otherwise. Set it to Persistent — see [above](#making-a-notification-stay-on-screen) |
+| Only a badge on the Ghostty Dock icon | That is the bell. The banner was Temporary and already gone, or the pane was in the active tab while Ghostty was focused — see [above](#the-number-on-the-dock-icon) |
 | Two notifications per event | A leftover agent-side notify hook running alongside Herdr — remove the hook |
 | Config edits ignored | `herdr server reload-config`; check for typos with `herdr config check` (a bare `[toast]` section is silently wrong — it must be `[ui.toast]`) |
 
@@ -195,3 +247,7 @@ Two things follow:
 
 - [Herdr configuration docs](https://herdr.dev/docs/configuration/)
 - [Ghostty configuration reference](https://ghostty.org/docs/config/reference)
+- [ADR 0008](decisions/0008-keep-one-agent-notification-channel-across-hosts.md) — the decision and
+  the alternatives that lost
+- [Manual setup, step 5](manual-setup.md#5-allow-notifications-and-make-them-stay-on-screen) — the
+  permission and the alert style, with a check for each
