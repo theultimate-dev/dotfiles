@@ -1,5 +1,6 @@
 brew "herdr"              # homebrew-core formula; upstream docs have an "Install with Homebrew" section
 brew "terminal-notifier"  # required in practice by docs/herdr-notifications.md
+brew "micro"              # terminal editor for quick edits next to a running agent; upstream README lists brew
 
 cask "ghostty"
 cask "zed"

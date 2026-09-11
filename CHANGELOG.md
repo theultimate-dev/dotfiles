@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- The `micro` terminal editor, installed through `Brewfile`, for quick edits next to a running
+  coding agent in Herdr or a plain terminal. Nothing sets `$EDITOR` to it yet; that arrives with
+  the zsh port.
 - `install.sh`: automated, offline configuration placement script depending strictly on macOS system
   bash 3.2 and coreutils. Manages destination include stubs using named delimited blocks (`# BEGIN
   dotfiles (public)` ... `# END dotfiles (public)`), with atomic temp-file writes, pre-modification

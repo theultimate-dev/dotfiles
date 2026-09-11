@@ -10,8 +10,9 @@ This covers the rationale behind package management choices in `Brewfile`, the m
 
 Every daily tool in this repository is delivered via Homebrew:
 
-- **Terminal emulator & GUI editors:** [Ghostty](https://ghostty.org), [Zed](https://zed.dev),
-  and [T3 Code](https://t3.codes).
+- **Terminal emulator:** [Ghostty](https://ghostty.org).
+- **Editors:** [micro](https://micro-editor.github.io) in the terminal, for quick edits next to a
+  running agent; [Zed](https://zed.dev) and [T3 Code](https://t3.codes) as GUI apps.
 - **Terminal multiplexer & notifier:** [Herdr](https://herdr.dev) and
   [`terminal-notifier`](https://github.com/julienXX/terminal-notifier).
 - **Coding agent CLIs:** [OpenAI Codex](https://github.com/openai/codex),
@@ -25,7 +26,7 @@ strictly separated per `AGENTS.md`. Shell add-ons (Oh My Zsh, plugins) and versi
 
 ### Two intentional deviations from vendor install channels
 
-Six of the eight tools explicitly document Homebrew as a supported or primary installation
+Seven of the nine tools explicitly document Homebrew as a supported or primary installation
 channel. Two do not:
 
 1. **`antigravity-cli` (Google Antigravity CLI):** Vendor documentation promotes an interactive

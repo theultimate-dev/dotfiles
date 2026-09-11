@@ -136,8 +136,8 @@ Installation follows the two-script split:
 The split exists so that config placement never depends on the network and stays debuggable on a
 half-broken machine.
 
-`setup.sh` installs the daily tools via Homebrew (Ghostty, Zed, T3 Code, Herdr, and coding agent
-CLIs) and configures Herdr agent integrations. Re-running it is safe and convergent. An app you
+`setup.sh` installs the daily tools via Homebrew (Ghostty, micro, Zed, T3 Code, Herdr, and coding
+agent CLIs) and configures Herdr agent integrations. Re-running it is safe and convergent. An app
 installed by hand before is left alone and reported; `./setup.sh --adopt` hands it to Homebrew,
 after explaining the macOS permission prompt that needs.
 
