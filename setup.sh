@@ -154,6 +154,24 @@ if [ "$BUNDLE_FAILED" -eq 1 ]; then
   warn "brew bundle reported failures; continuing with what did install"
 fi
 
+# ── Yazi plugins ──────────────────────────────────────────────────────────
+step "Yazi plugins"
+# ya pkg reads package.toml from Yazi's config directory and clones each locked
+# plugin into <config dir>/plugins/. That directory is the repo's yazi/, but
+# this shell may not export YAZI_CONFIG_HOME yet: install.sh runs after this
+# script, and a new ~/.zshenv is only read by a new shell. So it is set for
+# this one command. It clones from GitHub, which is why it lives here and not
+# in install.sh. A missing package.toml is a no-op, not an error.
+if command -v ya >/dev/null 2>&1; then
+  if YAZI_CONFIG_HOME="$DOTFILES/yazi" ya pkg install; then
+    echo "yazi plugins current"
+  else
+    warn "ya pkg install failed; re-run ./setup.sh once the network is back"
+  fi
+else
+  warn "ya not found on PATH (did the Brewfile step install yazi?) — skipping Yazi plugins"
+fi
+
 # ── python3 check ─────────────────────────────────────────────────────────
 step "python3 check"
 if ! command -v python3 >/dev/null 2>&1; then
