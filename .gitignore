@@ -7,6 +7,12 @@
 local.zsh
 local.ghostty
 
+# Third-party Yazi plugin code, fetched by `ya pkg` into the repo because the
+# repo directory is Yazi's config directory. setup.sh restores it from the
+# tracked yazi/package.toml lockfile; only the lock is ours.
+yazi/plugins/
+yazi/flavors/
+
 # Per-project coding-agent permission state.
 .claude/settings.local.json
 

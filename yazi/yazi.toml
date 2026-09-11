@@ -1,0 +1,64 @@
+# Yazi configuration — The Ultimate Dev / dotfiles (public).
+#
+# This directory is never copied into ~/.config/yazi. Yazi has no include
+# directive, so install.sh exports YAZI_CONFIG_HOME=<repo>/yazi from a named
+# block in ~/.zshenv, and Yazi reads this directory directly. Every zsh reads
+# ~/.zshenv, so a Yazi started from any terminal or editor sees it.
+#
+# Precedence, the part that bites: there is none. Yazi reads exactly one
+# config directory, so there is no machine-local override file for Yazi. An
+# override means editing this file, or exporting a different
+# YAZI_CONFIG_HOME below the block in ~/.zshenv.
+# See docs/yazi.md and docs/decisions/0010-export-a-config-directory-variable-from-zshenv.md.
+#
+# Tested with Yazi 26.9.1 and glow 3.0.0 from Homebrew. The `%s` opener
+# placeholders and the `[mgr]` section name need Yazi 25.x or newer.
+
+# ── Openers ───────────────────────────────────────
+# Explicit rather than $EDITOR: nothing sets EDITOR until the zsh port lands,
+# and Yazi's default `edit` opener would fall back to vi. The default
+# `edit` opener stays in every rule below so that a different editor is one
+# menu entry away.
+[opener]
+micro = [
+	{ run = 'micro %s', desc = "Edit (micro)", block = true, for = "unix" },
+]
+glow = [
+	# glow renders one document; %s1 is the first selected file.
+	{ run = 'glow -p %s1', desc = "Read (glow)", block = true, for = "unix" },
+]
+
+# ── Open rules ────────────────────────────────────
+# First match wins, so *.md must precede text/*. Enter runs the first opener
+# of the matched rule; Shift+Enter (or O) lists all of them.
+#
+# The trap: macOS `file` reports a .md file as text/plain, so a rule on the
+# markdown mime type never fires. Match the file name instead.
+[open]
+prepend_rules = [
+	{ url = "*.md", use = [ "glow", "micro", "edit", "reveal" ] },
+	{ mime = "text/*", use = [ "micro", "edit", "reveal" ] },
+	{ mime = "inode/empty", use = [ "micro", "edit", "reveal" ] },
+	{ mime = "application/{json,ndjson,javascript,wine-extension-ini}", use = [ "micro", "edit", "reveal" ] },
+]
+
+# ── Preview pane ──────────────────────────────────
+# Markdown rendered by glow through the official piper plugin (package.toml).
+# glow 2.x drops colour when stdout is not a tty; CLICOLOR_FORCE=1 keeps it.
+# $w is the pane width; $t is the terminal theme reported by Yazi.
+[[plugin.prepend_previewers]]
+url = "*.md"
+run = 'piper -- CLICOLOR_FORCE=1 glow -w=$w -s=$t "$1"'
+
+# ── Git status marks ──────────────────────────────
+# The official git plugin (package.toml, set up in init.lua) marks files and
+# rolls the state up onto directories. One fetcher for files, one for dirs.
+[[plugin.prepend_fetchers]]
+url   = "*"
+run   = "git"
+group = "git"
+
+[[plugin.prepend_fetchers]]
+url   = "*/"
+run   = "git"
+group = "git"

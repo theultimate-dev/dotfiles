@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Yazi configuration (`yazi/`), the third managed config: files open in micro, a `.md` file opens
+  in glow's pager with micro one pick-menu entry away, the preview pane renders Markdown through
+  glow, and a git status mark sits next to every changed file and directory. Yazi is reached
+  through `YAZI_CONFIG_HOME`, which `install.sh` exports from a block appended to `~/.zshenv`; the
+  repo directory is Yazi's config directory, so there is no machine-local override file for it.
+  Re-run `./setup.sh` (installs Yazi and restores its two plugins) then `./install.sh`, and open a
+  new shell. Yazi 25 or newer is required for the opener syntax.
 - `Brewfile`: `yazi` and `glow`, the tools Yazi previews through (`fd`, `ripgrep`, `fzf`,
   `zoxide`, `poppler`, `ffmpeg`, `imagemagick`, `jq`, `sevenzip`, `resvg`), and the
   `font-symbols-only-nerd-font` cask that Zed's terminal needs for Yazi's icons; Ghostty has them
