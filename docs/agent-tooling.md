@@ -127,7 +127,8 @@ default (unless `--no-upgrade` or `HOMEBREW_BUNDLE_NO_UPGRADE` is set).
 
 Therefore, running `setup.sh` again on an existing installation is **convergent, not inert**. It
 ensures new tools added to `Brewfile` are pulled down, verifies that Herdr integrations remain
-current, and adopts pre-existing applications without error.
+current, and reports any application it finds installed outside Homebrew — see
+[Apps you installed before Homebrew did](#apps-you-installed-before-homebrew-did).
 
 ---
 
@@ -222,7 +223,48 @@ must be applied manually once Grok has been initialized.
   placed a binary in `~/.local/bin/agy`. When `~/.zprofile` places `~/.local/bin` before Homebrew
   locations on `$PATH`, the standalone binary will shadow `/opt/homebrew/bin/agy`. `setup.sh`
   warns of this condition but will never delete the file.
-- **Existing application bundles:** If `/Applications/Ghostty.app` or `/Applications/Zed.app` was
-  installed via standalone downloads, `brew bundle` leverages `bundle/cask.rb`'s `--adopt` handling
-  to absorb existing bundles safely. A raw `brew install --cask` would otherwise abort with
-  `CaskError`.
+- **Existing application bundles:** an app already in `/Applications` that Homebrew did not
+  install is reported and skipped, never adopted on its own. The prompts, the `sudo`, and the
+  rollback that deletes the app are covered in
+  [Apps you installed before Homebrew did](#apps-you-installed-before-homebrew-did).
+
+---
+
+## Apps you installed before Homebrew did
+
+`setup.sh` looks at every cask in the `Brewfile` that installs an application bundle — Ghostty,
+Zed, T3 Code — and treats the app as **pre-existing and unmanaged** when the bundle is already in
+`/Applications` but Homebrew has no Caskroom entry for it. Those apps are skipped, through
+`HOMEBREW_BUNDLE_CASK_SKIP`, and listed. Nothing is adopted unless `setup.sh` is run with
+`--adopt`. The reason is what adoption actually does:
+
+- `brew bundle` passes `--adopt` to every cask install, and adoption is not the no-op it looks
+  like. When the cask has an artifact *inside* the bundle — Zed's `binary` stanza links
+  `Zed.app/Contents/MacOS/cli` to `/opt/homebrew/bin/zed` — Homebrew writes a Spotlight
+  alternate-name attribute onto that file. Since macOS 13, modifying an app bundle that your
+  terminal did not install requires the **App Management** privacy permission, so macOS shows a
+  dialog asking to let the terminal update or delete other applications. T3 Code adopts silently
+  because its cask has nothing inside the bundle to touch.
+- The attempt that triggers the dialog fails with `Operation not permitted` whatever you answer;
+  Homebrew's own advice is to approve and run the command again. `brew install`, however, treats
+  the failure as an install error and rolls back: it copies the app into the Caskroom as a backup,
+  removes it from `/Applications`, then purges that Caskroom version — backup included. In the
+  transcript this reads `Backing up App`, `Removing App`, `Purging files for version …`, and the
+  app you installed by hand is gone. Your data is not: Zed keeps it in `~/.config/zed` and
+  `~/Library/Application Support/Zed`, so a reinstall picks everything up.
+- A `Password:` prompt can appear too. It is Homebrew's `sudo`, not this script's — used to copy
+  and re-own bundle files that belong to another user, and for the `chmod` before that attribute
+  write. It also shows up far earlier in the transcript than the step that caused it: `brew
+  bundle` buffers the output of the `brew install` it runs and replays it only when the batch
+  fails, while `sudo` writes its prompt straight to the terminal.
+
+`--adopt` prints that explanation, then probes the permission the way Homebrew does — creating
+and removing an empty file at the root of each pre-existing bundle — *before* `brew bundle` runs.
+A refused permission stops the script there, with nothing changed; the destructive rollback is
+never reached. An app owned by another user stops it as well: `sudo` does not bypass the
+permission, and the ownership is not this script's to change.
+
+The trade-off is recorded in
+[ADR 0007](decisions/0007-leave-pre-existing-apps-unadopted-by-default.md). Until you opt in, a
+skipped app is not on Homebrew's books: `brew bundle check` lists it as missing, and the `binary`
+link Homebrew would have created for it (`/opt/homebrew/bin/zed`) does not exist.

@@ -115,7 +115,9 @@ those steps stay manual no matter what the installer does, because no script can
 login or type an API key on your behalf.
 
 `setup.sh` installs the daily tools via Homebrew (Ghostty, Zed, T3 Code, Herdr, and coding agent
-CLIs) and configures Herdr agent integrations. Re-running it is safe and convergent.
+CLIs) and configures Herdr agent integrations. Re-running it is safe and convergent. An app you
+installed by hand before is left alone and reported; `./setup.sh --adopt` hands it to Homebrew,
+after explaining the macOS permission prompt that needs.
 
 The split exists so that config placement never depends on the network and stays debuggable on a
 half-broken machine. `install.sh` will land in a subsequent change; it will support `--dry-run` to

@@ -86,8 +86,22 @@ cd <repo>
 ./setup.sh
 ```
 
-Re-running is safe and convergent: it upgrades what Homebrew manages, adopts applications you had
-installed by hand, and skips integrations already marked current.
+Re-running is safe and convergent: it upgrades what Homebrew manages, leaves applications you had
+installed by hand alone, and skips integrations already marked current.
+
+**Already have Ghostty, Zed or T3 Code in `/Applications`?** `setup.sh` lists an app it did not
+install, leaves it alone, and installs everything else. To hand those apps over to Homebrew:
+
+```sh
+./setup.sh --adopt
+```
+
+It names the two prompts that can follow — a macOS dialog asking to let your terminal manage
+other apps, which you must allow, and possibly your password — and checks the permission before
+Homebrew touches anything. If the dialog appears, allow it and run the command once more: macOS
+refuses the very attempt that makes it ask. Why the default is to skip, and what a refused dialog
+would otherwise have cost you, is in
+[Apps you installed before Homebrew did](agent-tooling.md#apps-you-installed-before-homebrew-did).
 
 **Verify.**
 
@@ -99,6 +113,9 @@ brew bundle check --file=<repo>/Brewfile
 The Brewfile's dependencies are satisfied.
 ```
 
+An app `setup.sh` skipped shows up in the first check as missing until you adopt it. That is the
+expected state, not drift. After `--adopt`, `brew list --cask zed` names it.
+
 **Undo.** Not `brew bundle cleanup` — that removes what is *not* in the `Brewfile`. Uninstall per
 entry instead, and remove Homebrew itself only with its own uninstaller:
 
@@ -107,6 +124,9 @@ brew bundle list --all --file=<repo>/Brewfile   # everything setup.sh installed
 brew uninstall --cask ghostty                   # ...one entry at a time
 herdr integration uninstall claude              # ...and any integration it registered
 ```
+
+Adoption has no undo that keeps the app: `brew uninstall --cask zed` removes the bundle Homebrew
+took over. To have it outside Homebrew again, reinstall it from the vendor's download.
 
 **Why it works this way.** Homebrew is the single installer of record because the vendors' curl
 scripts rewrite `~/.zshrc` and symlink into `$HOME` — see

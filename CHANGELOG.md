@@ -11,7 +11,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `Brewfile` and `setup.sh` to install daily macOS development tools and coding agents via Homebrew
   (Ghostty, Zed, Herdr, T3 Code, OpenAI Codex, GitHub Copilot CLI, Google Antigravity CLI, and xAI
-  Grok Build), plus automated installation for Herdr session identity integrations.
+  Grok Build), plus automated installation for Herdr session identity integrations. An app
+  already in `/Applications` that Homebrew did not install is listed and skipped;
+  `./setup.sh --adopt` hands it to Homebrew after checking the macOS App Management permission.
+- Decision record `docs/decisions/0007-leave-pre-existing-apps-unadopted-by-default.md`,
+  recording why `setup.sh` never adopts an app you installed by hand unless asked: adoption can
+  trigger a macOS permission dialog and a `sudo` prompt, and a refused dialog makes Homebrew's
+  rollback delete the app.
 - Decision records in `docs/decisions/`, in Michael Nygard's five-section ADR format, recording why
   the delivery model is what it is: include stubs instead of symlinks, git included from
   `~/.config/git/config`, Homebrew as the single install channel, auto-updating casks left to manage
@@ -42,6 +48,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `setup.sh` no longer lets Homebrew adopt an app you installed by hand. Such apps are listed and
+  skipped; `./setup.sh --adopt` opts in, names the macOS App Management dialog and the possible
+  password prompt first, and stops before `brew bundle` if the permission is refused, so
+  Homebrew's rollback can no longer delete the app.
+- `setup.sh` keeps going when `brew bundle` reports a failure: the python3 check, the Herdr
+  integrations and the post-install notes still run for what did install, and the script exits
+  non-zero at the end instead of stopping at the failed package.
+- `setup.sh` silences Homebrew's environment hints for its own run, so its output is shorter.
 - `AGENTS.md` no longer describes git configuration as a shared `~/.gitconfig` owned through
   BEGIN/END sentinel blocks. That scheme was superseded when the repo moved to including from
   `~/.config/git/config`, and the invariant, the precedence table and the machine-local override
