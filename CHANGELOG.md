@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `Brewfile`: `yazi` and `glow`, the tools Yazi previews through (`fd`, `ripgrep`, `fzf`,
+  `zoxide`, `poppler`, `ffmpeg`, `imagemagick`, `jq`, `sevenzip`, `resvg`), and the
+  `font-symbols-only-nerd-font` cask that Zed's terminal needs for Yazi's icons; Ghostty has them
+  built in.
 - Ghostty configuration (`ghostty/config.ghostty`), the second managed config: font, a theme that
   follows the macOS appearance, window and clipboard behaviour, shell integration, and the
   notification settings that turn an agent's escape sequences into macOS notifications.
