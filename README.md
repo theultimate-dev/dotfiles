@@ -34,8 +34,9 @@ Set up your macOS development environment in three steps:
 `~/.config/git/config`; it will never write your `~/.gitconfig`. See
 [why that is structural, not a convention](#included-never-installed-over-your-git-config).
 
-> **Status:** this repo is being built in the open. Tool installation and git defaults are live;
-> shell and terminal configs follow. [`CHANGELOG.md`](CHANGELOG.md) tracks what has arrived.
+> **Status:** this repo is being built in the open. Tool installation, git defaults and the Ghostty
+> configuration are live; the shell config follows. [`CHANGELOG.md`](CHANGELOG.md) tracks what has
+> arrived.
 
 ## Platform
 
@@ -71,7 +72,7 @@ the other's destination. A farm of symlinks structurally cannot do this: there i
 
 Most dotfiles repos symlink `~/.zshrc` into the repo. This one does not.
 
-Instead, the installer will write a small **real file** at each destination that redirects into the
+Instead, the installer writes a small **real file** at each destination that redirects into the
 repo using the target tool's own native include directive:
 
 | Destination | Redirect |
@@ -161,6 +162,7 @@ see [Manual setup](docs/manual-setup.md).
 | [`setup.sh`](setup.sh) | Tool installation and Herdr agent integration script |
 | [`install.sh`](install.sh) | Configuration placement script (atomic writes, no symlinks) |
 | `git/` | Managed git configuration |
+| `ghostty/` | Managed Ghostty configuration |
 | [`LICENSE`](LICENSE) | MIT — see [Licence and scope](#licence-and-scope) |
 | `docs/` | Deep dives on the pieces whose reasoning is not obvious from the code |
 | [`docs/decisions/`](docs/decisions/) | Architecture decision records — why a choice was made, and what was rejected |

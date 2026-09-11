@@ -8,7 +8,8 @@ contributor. `CLAUDE.md` imports this file; Claude-specific notes live there and
 The public share of a personal macOS development stack — everything from a private `~/dotfiles`
 that can be made public and is worth sharing.
 
-**Current state:** documentation only. The installer and the configuration are ported in over time.
+**Current state:** the installer, the git defaults and the Ghostty configuration are in; the rest is
+ported in over time.
 The delivery model below is not aspirational — it is proven in the private original and is binding
 for every file that lands here.
 

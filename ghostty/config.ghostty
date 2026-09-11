@@ -1,0 +1,84 @@
+# Ghostty configuration — The Ultimate Dev / dotfiles (public).
+#
+# This file is never installed over your Ghostty config. install.sh writes a
+# `config-file = <repo>/ghostty/config.ghostty` line into
+# ~/.config/ghostty/config.ghostty, and Ghostty reads this file from there.
+#
+# Precedence, the part that bites: Ghostty applies every `config-file` AFTER
+# the whole top-level file, and the later file wins. A key typed into the stub
+# is therefore overridden by this file. Machine-local overrides belong in
+# ~/.config/ghostty/local.ghostty, which the stub includes after this file so
+# that it wins. See docs/decisions/0009-insert-the-ghostty-block-first.md.
+#
+# Tested with Ghostty 1.3.1. The `config.ghostty` file name is only read by
+# Ghostty 1.2.3 or newer; older versions ignore the stub silently.
+
+# ── Font ──────────────────────────────────────────
+# JetBrains Mono ships inside Ghostty, so this needs no font install.
+font-family = "JetBrains Mono"
+font-size = 14
+font-thicken = true
+font-feature = -calt
+
+# ── Theme (follows the macOS appearance) ──────────
+theme = light:Catppuccin Latte,dark:Catppuccin Mocha
+
+# ── Window ────────────────────────────────────────
+macos-titlebar-style = tabs
+window-padding-x = 10
+window-padding-y = 10
+window-padding-balance = true
+window-colorspace = display-p3
+window-save-state = always
+
+# ── Appearance ────────────────────────────────────
+background-opacity = 0.90
+background-blur = true
+unfocused-split-opacity = 0.6
+cursor-style = bar
+cursor-style-blink = true
+
+# ── Behavior ──────────────────────────────────────
+macos-option-as-alt = left
+mouse-hide-while-typing = true
+confirm-close-surface = false
+clipboard-read = allow
+clipboard-write = allow
+scrollbar = system
+
+# ── Shell integration ─────────────────────────────
+shell-integration = detect
+shell-integration-features = cursor,sudo,title
+
+# ── Notifications (Ghostty 1.3+) ─────────────────
+# Native macOS notification when a foreground shell command that ran longer
+# than 10 s finishes in a pane you are not looking at. Timed through the
+# OSC 133 marks that shell integration emits, so `shell-integration` above
+# is what makes this work. An interactive agent is one long-lived command:
+# this fires when the agent *exits*, not per turn.
+notify-on-command-finish = unfocused
+notify-on-command-finish-action = notify
+notify-on-command-finish-after = 10s
+
+# Programs in the terminal may raise native macOS notifications through the
+# OSC 9 / OSC 777 escape sequences. Claude Code (`preferredNotifChannel =
+# iterm2_with_bell`), Codex and Gemini all emit them; no hook scripts needed.
+# Ghostty suppresses the notification while the emitting pane is focused, and
+# auto-dismisses it after 3 s if the window is focused, whatever the alert
+# style. This is the default; it is spelled out because the whole
+# notification design rests on it — see docs/herdr-notifications.md.
+desktop-notifications = true
+
+# Claude Code's iterm2_with_bell channel also rings the terminal bell, for
+# terminals that never parse OSC 9 (Zed's Terminal Threads). With the default
+# `bell-features` (attention,title) that bell bounces the Dock icon once and
+# counts up a badge while Ghostty is unfocused, and prefixes 🔔 to the pane
+# title. That badge is what you see when the notification itself was already
+# dismissed. Once alerts are set to Persistent (docs/manual-setup.md, step 5)
+# the badge is redundant; uncomment to keep only the notification:
+# bell-features = no-attention,no-title
+
+# ── Quick terminal ────────────────────────────────
+# A global shortcut works from any app. macOS asks for the Accessibility
+# permission for Ghostty the first time; without it the key does nothing.
+keybind = global:cmd+grave_accent=toggle_quick_terminal

@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Ghostty configuration (`ghostty/config.ghostty`), the second managed config: font, a theme that
+  follows the macOS appearance, window and clipboard behaviour, shell integration, and the
+  notification settings that turn an agent's escape sequences into macOS notifications.
+  `install.sh` reaches it through a `config-file` block placed at the top of
+  `~/.config/ghostty/config.ghostty`; machine-local overrides go in
+  `~/.config/ghostty/local.ghostty`, which that block includes last. Re-run `./install.sh` to get
+  it; Ghostty 1.2.3 or newer is required for the file name.
+- Decision record `docs/decisions/0009-insert-the-ghostty-block-first.md`, recording why the
+  Ghostty include block goes first in the destination file: Ghostty applies every `config-file`
+  after the whole file, in order, later file wins.
 - The `micro` terminal editor, installed through `Brewfile`, for quick edits next to a running
   coding agent in Herdr or a plain terminal. Nothing sets `$EDITOR` to it yet; that arrives with
   the zsh port.
@@ -59,6 +69,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `install.sh` matches its block markers as whole lines, refuses a destination that carries only
+  one of the two markers instead of appending a second block, and keeps a destination's file
+  permissions when it updates a block in place.
 - `setup.sh` no longer lets Homebrew adopt an app you installed by hand. Such apps are listed and
   skipped; `./setup.sh --adopt` opts in, names the macOS App Management dialog and the possible
   password prompt first, and stops before `brew bundle` if the permission is refused, so

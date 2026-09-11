@@ -15,8 +15,8 @@ expands it for you.
 macOS only. Git push defaults additionally need **git 2.37 or newer** — check with `git --version`,
 because on older git the settings `install.sh` activates are silently inert.
 
-**What gets written.** Three files outside this repo, and nothing else. No step creates a symlink,
-and no step overwrites a file wholesale:
+**What gets written.** Three files outside this repo by hand, and nothing else. No step creates a
+symlink, and no step overwrites a file wholesale:
 
 | Path | Step | Action | Present today? |
 |---|---|---|---|
@@ -24,8 +24,10 @@ and no step overwrites a file wholesale:
 | `~/.claude/settings.json` | 4 | one key added | present if Claude Code is installed |
 | `~/.grok/config.toml` | 6 | edited only if the collision fires | conditional |
 
-Steps 1 to 3 also install software and write credentials, but only into each tool's own
-configuration directory. Steps 2, 3 and 5 are interactive — a browser login, a settings pane — and
+`install.sh` in step 1 additionally writes the two include stubs, `~/.config/git/config` and
+`~/.config/ghostty/config.ghostty`, and takes its own backups before touching either. Steps 1 to 3
+also install software and write credentials, but only into each tool's own configuration
+directory. Steps 2, 3 and 5 are interactive — a browser login, a settings pane — and
 have no terminal equivalent.
 
 **Snapshot.** Do this once, before step 1. It is the difference between "I changed something" and
@@ -34,7 +36,8 @@ have no terminal equivalent.
 ```sh
 mkdir -p ~/.dotfiles-backup
 
-for f in ~/.config/herdr/config.toml ~/.claude/settings.json ~/.grok/config.toml; do
+for f in ~/.config/herdr/config.toml ~/.claude/settings.json ~/.grok/config.toml \
+         ~/.config/ghostty/config.ghostty; do
   if [ -e "$f" ]; then
     cp -p "$f" ~/.dotfiles-backup/"$(printf '%s' "${f#$HOME/.}" | tr / -)"
     echo "saved:  $f"
@@ -77,7 +80,7 @@ there is simply nothing there to configure.)
 **What you get.** Homebrew plus every tool the rest of this guide configures — Ghostty, Zed, Herdr,
 T3 Code, `terminal-notifier`, and the coding agent CLIs — installed and on `$PATH`, with Herdr's
 session-identity integration registered for each agent whose config directory already exists, and
-configuration stubs placed atomically via `./install.sh`.
+the git and Ghostty include stubs placed atomically via `./install.sh`.
 
 **Do this.**
 
@@ -393,8 +396,10 @@ them instead of acting — see
 ## What the installer has taken over
 
 `install.sh` has landed. It automates Git push defaults by writing the `[include]` into
-`${XDG_CONFIG_HOME:-~/.config}/git/config` with pre-modification backups, delimited blocks, and
-`--check` drift detection.
+`${XDG_CONFIG_HOME:-~/.config}/git/config`, and the Ghostty configuration by writing a
+`config-file` block into `${XDG_CONFIG_HOME:-~/.config}/ghostty/config.ghostty` — both with
+pre-modification backups, delimited blocks, and `--check` drift detection. Machine-local Ghostty
+settings go in `~/.config/ghostty/local.ghostty`, which that block includes last so that it wins.
 
 The rest stays, and stays here:
 
