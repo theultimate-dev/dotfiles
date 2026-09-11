@@ -25,6 +25,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   built in.
 - `setup.sh`: restores Yazi's plugins from the tracked `yazi/package.toml` lockfile with `ya pkg
   install`, after the Brewfile step.
+- `docs/yazi.md`, the deep dive on the Yazi setup, and step 7 in `docs/manual-setup.md` for the
+  Zed font fallback.
 - Ghostty configuration (`ghostty/config.ghostty`), the second managed config: font, a theme that
   follows the macOS appearance, window and clipboard behaviour, shell integration, and the
   notification settings that turn an agent's escape sequences into macOS notifications.

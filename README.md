@@ -34,9 +34,9 @@ Set up your macOS development environment in three steps:
 `~/.config/git/config`; it will never write your `~/.gitconfig`. See
 [why that is structural, not a convention](#included-never-installed-over-your-git-config).
 
-> **Status:** this repo is being built in the open. Tool installation, git defaults and the Ghostty
-> configuration are live; the shell config follows. [`CHANGELOG.md`](CHANGELOG.md) tracks what has
-> arrived.
+> **Status:** this repo is being built in the open. Tool installation, git defaults, the Ghostty
+> configuration and the Yazi file manager are live; the shell config follows.
+> [`CHANGELOG.md`](CHANGELOG.md) tracks what has arrived.
 
 ## Platform
 
@@ -56,6 +56,7 @@ rule, not an accident, and it shapes what you will find here.
 | **git** | push and branch-tracking defaults, aliases, pager and diff setup, a global ignore file | `[user]` identity, signing keys, per-client directory routing |
 | **zsh** | the shell configuration itself | secrets, tokens, anything host-specific |
 | **terminal** | the Ghostty configuration | machine-specific display and font tweaks |
+| **files** | the Yazi configuration: openers, Markdown preview, git status marks | nothing — Yazi reads one directory, so there is no local layer |
 
 The git line is the one worth stating outright: **this repo will never contain a `[user]`
 section.** No name, no email, no signing key. Your identity lives in your own `~/.gitconfig`, which
@@ -80,6 +81,7 @@ repo using the target tool's own native include directive:
 | `~/.zshrc` | `source <repo>/zsh/.zshrc` |
 | `~/.config/git/config` — never `~/.gitconfig` | `[include] path = <repo>/git/.gitconfig` |
 | `~/.config/ghostty/config.ghostty` | `config-file = <repo>/ghostty/config.ghostty` |
+| `~/.zshenv` | `export YAZI_CONFIG_HOME=<repo>/yazi` — Yazi has no include directive; the variable names the directory |
 | `~/.tool-versions` | byte copy — asdf has no include mechanism |
 | `scripts/` | added to `$PATH`; no file installed |
 
@@ -93,7 +95,8 @@ immediately, and `git diff` audits your entire configuration — and you lose th
 
 The cost is that each tool's include semantics differ, and two of them are opposites: **git's stub
 overrides the repo, while Ghostty's repo overrides the stub.** That is the one thing worth
-internalizing before editing anything here.
+internalizing before editing anything here. The third kind, an environment variable that names the
+repo directory, has no precedence at all: Yazi reads that one directory, and nothing else.
 
 ### Included, never installed over your git config
 
@@ -137,10 +140,11 @@ Installation follows the two-script split:
 The split exists so that config placement never depends on the network and stays debuggable on a
 half-broken machine.
 
-`setup.sh` installs the daily tools via Homebrew (Ghostty, micro, Zed, T3 Code, Herdr, and coding
-agent CLIs) and configures Herdr agent integrations. Re-running it is safe and convergent. An app
-installed by hand before is left alone and reported; `./setup.sh --adopt` hands it to Homebrew,
-after explaining the macOS permission prompt that needs.
+`setup.sh` installs the daily tools via Homebrew (Ghostty, micro, Yazi and glow with the tools
+Yazi previews through, Zed, T3 Code, Herdr, and coding agent CLIs), restores Yazi's plugins from
+the tracked lockfile, and configures Herdr agent integrations. Re-running it is safe and
+convergent. An app installed by hand before is left alone and reported; `./setup.sh --adopt`
+hands it to Homebrew, after explaining the macOS permission prompt that needs.
 
 `install.sh` places configuration stubs using native include directives and named delimited blocks.
 It supports two non-destructive flags:
@@ -163,6 +167,7 @@ see [Manual setup](docs/manual-setup.md).
 | [`install.sh`](install.sh) | Configuration placement script (atomic writes, no symlinks) |
 | `git/` | Managed git configuration |
 | `ghostty/` | Managed Ghostty configuration |
+| `yazi/` | Managed Yazi configuration; `plugins/` inside it is restored by `setup.sh` and untracked |
 | [`LICENSE`](LICENSE) | MIT — see [Licence and scope](#licence-and-scope) |
 | `docs/` | Deep dives on the pieces whose reasoning is not obvious from the code |
 | [`docs/decisions/`](docs/decisions/) | Architecture decision records — why a choice was made, and what was rejected |
@@ -178,8 +183,16 @@ see [Manual setup](docs/manual-setup.md).
 - [Decision records](docs/decisions/) — the choices that outlive the change that introduced them,
   each in five terse sections with the alternative that lost. Start with
   [0001](docs/decisions/0001-deliver-configs-as-include-stubs-not-symlinks.md) for the no-symlink
-  model and [0002](docs/decisions/0002-include-git-config-from-xdg-never-gitconfig.md) for why this
-  repo never writes your `~/.gitconfig`.
+  model, [0002](docs/decisions/0002-include-git-config-from-xdg-never-gitconfig.md) for why this
+  repo never writes your `~/.gitconfig`, and
+  [0010](docs/decisions/0010-export-a-config-directory-variable-from-zshenv.md) for the one tool
+  reached through an environment variable instead of a stub.
+- [Yazi](docs/yazi.md) — a terminal file manager that opens files in micro, reads Markdown in
+  glow with micro one menu away, renders Markdown in its preview pane, and marks git status next
+  to every file. Also: why its config is delivered through `YAZI_CONFIG_HOME` in `~/.zshenv`
+  rather than a stub, why that means no machine-local override, why the Markdown rule matches the
+  file name and not the mime type, and which of your two terminals needs a Nerd Font for the
+  icons.
 - [Git push defaults](docs/git-push-defaults.md) — why `push.autoSetupRemote = true` on its own does
   not do what everyone expects, why `branch.autoSetupMerge = simple` is the other half of it, and
   why the popular `push.default = current` workaround is worse than the problem: the push succeeds,

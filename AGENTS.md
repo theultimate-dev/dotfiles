@@ -8,8 +8,8 @@ contributor. `CLAUDE.md` imports this file; Claude-specific notes live there and
 The public share of a personal macOS development stack — everything from a private `~/dotfiles`
 that can be made public and is worth sharing.
 
-**Current state:** the installer, the git defaults and the Ghostty configuration are in; the rest is
-ported in over time.
+**Current state:** the installer, the git defaults, the Ghostty configuration and the Yazi
+configuration are in; the rest is ported in over time.
 The delivery model below is not aspirational — it is proven in the private original and is binding
 for every file that lands here.
 
@@ -52,6 +52,7 @@ using the target tool's *own* native include directive:
 | `~/.zshrc` | `source <repo>/zsh/.zshrc` |
 | `~/.gitconfig` | `[include] path = <repo>/git/.gitconfig` |
 | `~/.config/ghostty/config.ghostty` | `config-file = <repo>/ghostty/config.ghostty` |
+| `~/.zshenv` | `export YAZI_CONFIG_HOME=<repo>/yazi` — the variable names the directory; see ADR 0010 |
 | `~/.tool-versions` | byte copy — asdf has no include mechanism |
 | `scripts/` | `<repo>/scripts` prepended to `$PATH`; no file installed |
 
@@ -71,9 +72,13 @@ If a change appears to require a symlink, it requires a different design. Raise 
 ### Adding a new destination
 
 1. Prefer the tool's own include directive, and generate a stub containing it.
-2. If the tool has no include mechanism, copy the file — and make the installer *report* drift
-   rather than pretend to prevent it.
-3. If the tool can be reached through `$PATH`, install no file at all.
+2. If the tool has no include directive but reads its config directory from an environment
+   variable, export that variable from the named block in `~/.zshenv` — and accept that the tool
+   then has no machine-local override layer. See
+   [ADR 0010](docs/decisions/0010-export-a-config-directory-variable-from-zshenv.md).
+3. If the tool has neither, copy the file — and make the installer *report* drift rather than
+   pretend to prevent it.
+4. If the tool can be reached through `$PATH`, install no file at all.
 
 ---
 
@@ -122,6 +127,7 @@ only when it does not.
 | **git** | **`~/.gitconfig`** — git reads `~/.config/git/config` first, and the later value wins | `~/.gitconfig`, which this repo never writes |
 | **Ghostty** | the **repo** — `config-file` is processed at the *end* of the containing file | `~/.config/ghostty/local.ghostty` |
 | **zsh** | **local** — later lines win | `~/.config/dotfiles/local.zsh`, sourced last |
+| **Yazi** | the **repo** — it is the only directory Yazi reads | none; a different `YAZI_CONFIG_HOME` exported below the block in `~/.zshenv` |
 
 Practical consequence: `git config --global …` writes into `~/.gitconfig`, not into this repo, and
 wins over it. That is intentional — `~/.gitconfig` is the machine-local override layer — but it
@@ -204,7 +210,7 @@ Format is `type(scope): description`, per
 
 - **Descriptions are past tense** — `feat(zsh): added a notification for long-running commands`.
 - **Scope is optional but preferred**, naming the top-level directory or subject: `install`,
-  `setup`, `zsh`, `git`, `ghostty`, `scripts`, `brew`, `asdf`, `docs`, `claude`.
+  `setup`, `zsh`, `git`, `ghostty`, `yazi`, `scripts`, `brew`, `asdf`, `docs`, `claude`.
 - **One self-contained unit of work per commit.** Unrelated changes get their own commits; when the
   working tree mixes them, split rather than bundle.
 - **Breaking changes** — anything in the MAJOR row above — take a `!` after the type or scope *and*

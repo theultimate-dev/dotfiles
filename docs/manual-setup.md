@@ -15,7 +15,7 @@ expands it for you.
 macOS only. Git push defaults additionally need **git 2.37 or newer** — check with `git --version`,
 because on older git the settings `install.sh` activates are silently inert.
 
-**What gets written.** Three files outside this repo by hand, and nothing else. No step creates a
+**What gets written.** Four files outside this repo by hand, and nothing else. No step creates a
 symlink, and no step overwrites a file wholesale:
 
 | Path | Step | Action | Present today? |
@@ -23,12 +23,13 @@ symlink, and no step overwrites a file wholesale:
 | `~/.config/herdr/config.toml` | 4 | created, or edited | absent until Herdr first runs |
 | `~/.claude/settings.json` | 4 | one key added | present if Claude Code is installed |
 | `~/.grok/config.toml` | 6 | edited only if the collision fires | conditional |
+| `~/.config/zed/settings.json` | 7 | one key added | present if Zed has been run |
 
-`install.sh` in step 1 additionally writes the two include stubs, `~/.config/git/config` and
-`~/.config/ghostty/config.ghostty`, and takes its own backups before touching either. Steps 1 to 3
-also install software and write credentials, but only into each tool's own configuration
-directory. Steps 2, 3 and 5 are interactive — a browser login, a settings pane — and
-have no terminal equivalent.
+`install.sh` in step 1 additionally writes three managed blocks — the include stubs
+`~/.config/git/config` and `~/.config/ghostty/config.ghostty`, and an `export` of `YAZI_CONFIG_HOME`
+in `~/.zshenv` — and takes its own backups before touching any of them. Steps 1 to 3 also install
+software and write credentials, but only into each tool's own configuration directory. Steps 2, 3
+and 5 are interactive — a browser login, a settings pane — and have no terminal equivalent.
 
 **Snapshot.** Do this once, before step 1. It is the difference between "I changed something" and
 "I can put it back":
@@ -37,7 +38,7 @@ have no terminal equivalent.
 mkdir -p ~/.dotfiles-backup
 
 for f in ~/.config/herdr/config.toml ~/.claude/settings.json ~/.grok/config.toml \
-         ~/.config/ghostty/config.ghostty; do
+         ~/.config/ghostty/config.ghostty ~/.zshenv ~/.config/zed/settings.json; do
   if [ -e "$f" ]; then
     cp -p "$f" ~/.dotfiles-backup/"$(printf '%s' "${f#$HOME/.}" | tr / -)"
     echo "saved:  $f"
@@ -69,18 +70,24 @@ known-good state than from a half-applied one.
 the file outright if the loop above reported it absent. Each step below names its own.
 
 **Order.** Steps 1 to 3 run in sequence — you cannot log in to a tool that is not installed yet.
-Steps 4 to 6 are independent of each other and of the first three: run them in any order, or skip
-the ones you do not want. (Steps 4 and 6 configure tools that step 1 installs; if you skipped step 1
-there is simply nothing there to configure.)
+Steps 4 to 7 are independent of each other and of the first three: run them in any order, or skip
+the ones you do not want. (Steps 4, 6 and 7 configure tools that step 1 installs; if you skipped
+step 1 there is simply nothing there to configure.)
 
 ---
 
 ## 1. Install the tools and place configs
 
 **What you get.** Homebrew plus every tool the rest of this guide configures — Ghostty, Zed, Herdr,
-T3 Code, `terminal-notifier`, and the coding agent CLIs — installed and on `$PATH`, with Herdr's
-session-identity integration registered for each agent whose config directory already exists, and
-the git and Ghostty include stubs placed atomically via `./install.sh`.
+T3 Code, `terminal-notifier`, Yazi with glow and the tools its previews run through, and the
+coding agent CLIs — installed and on `$PATH`, with Herdr's session-identity integration registered
+for each agent whose config directory already exists, Yazi's two plugins restored from the
+tracked lockfile, and the git and Ghostty include stubs plus the `YAZI_CONFIG_HOME` export in
+`~/.zshenv` placed atomically via `./install.sh`. Open a new shell afterwards, or run
+`source ~/.zshenv; rehash` in this one: `~/.zshenv` is read at shell start, so a Yazi started from
+the shell that ran the installer does not see the export, and inside this repo that same shell's
+stale command hash plus zsh's `auto_cd` turn a bare `yazi` into `cd yazi/` — see
+[the trap](yazi.md#trap-the-shell-you-installed-from).
 
 **Do this.**
 
@@ -113,12 +120,23 @@ would otherwise have cost you, is in
 ```sh
 brew bundle check --file=<repo>/Brewfile
 ./install.sh --check
+zsh -c 'print $YAZI_CONFIG_HOME'
+zsh -c 'ya pkg list'
 ```
 
 ```
 The Brewfile's dependencies are satisfied.
 Check passed: all managed stubs are current.
+<repo>/yazi
+Plugins:
+	yazi-rs/plugins:git (…)
+	yazi-rs/plugins:piper (…)
+Flavors:
 ```
+
+The last two run in a fresh `zsh` on purpose, so they see the `~/.zshenv` the installer just
+wrote. Then, in any git repository with an uncommitted change, `yazi` shows a mark next to the
+changed file, hovering a `.md` file renders it in the preview pane, and Enter on it opens glow.
 
 An app `setup.sh` skipped shows up in the first check as missing until you adopt it. That is the
 expected state, not drift. After `--adopt`, `brew list --cask zed` names it.
@@ -129,8 +147,14 @@ entry instead, and remove Homebrew itself only with its own uninstaller:
 ```sh
 brew bundle list --all --file=<repo>/Brewfile   # everything setup.sh installed
 brew uninstall --cask ghostty                   # ...one entry at a time
+brew uninstall yazi glow                        # ...Yazi and its reader likewise
 herdr integration uninstall claude              # ...and any integration it registered
+cp -p ~/.dotfiles-backup/zshenv ~/.zshenv       # the ~/.zshenv from before the export block
 ```
+
+If `~/.zshenv` did not exist before, delete it instead of restoring it; the snapshot loop above
+reported which. Yazi's plugin code is inside the repo under `yazi/plugins/`, untracked, and goes
+away with the clone.
 
 Adoption has no undo that keeps the app: `brew uninstall --cask zed` removes the bundle Homebrew
 took over. To have it outside Homebrew again, reinstall it from the vendor's download.
@@ -415,13 +439,44 @@ them instead of acting — see
 
 ---
 
+## 7. Yazi icons in Zed's terminal
+
+**What you get.** Yazi's file icons and git status signs rendered in Zed's built-in terminal.
+Ghostty needs nothing: it ships the Nerd Font symbols and falls back to them on its own. Zed has
+no such fallback, so it must be pointed at the symbols font that step 1 installed.
+
+**Do this.** Open Zed's settings (`Cmd+,`) and add a font fallback for the terminal:
+
+```json
+{
+  "terminal": {
+    "font_fallbacks": ["Symbols Nerd Font Mono"]
+  }
+}
+```
+
+**Verify.** In a Zed terminal, `yazi` shows an icon before each file name rather than an empty
+box, and a changed file in a git repository carries its sign.
+
+**Undo.** Remove the `font_fallbacks` line, or restore
+`~/.dotfiles-backup/config-zed-settings.json`.
+
+**Why it works this way.** Zed's settings are unmanaged here, so this is a by-hand edit rather than
+an installer step — see
+[ADR 0005](decisions/0005-install-agent-tooling-without-managing-its-config.md) and
+[Icons: two hosts, two answers](yazi.md#icons-two-hosts-two-answers).
+
+---
+
 ## What the installer has taken over
 
 `install.sh` has landed. It automates Git push defaults by writing the `[include]` into
-`${XDG_CONFIG_HOME:-~/.config}/git/config`, and the Ghostty configuration by writing a
-`config-file` block into `${XDG_CONFIG_HOME:-~/.config}/ghostty/config.ghostty` — both with
+`${XDG_CONFIG_HOME:-~/.config}/git/config`, the Ghostty configuration by writing a
+`config-file` block into `${XDG_CONFIG_HOME:-~/.config}/ghostty/config.ghostty`, and the Yazi
+configuration by appending an `export YAZI_CONFIG_HOME` block to `~/.zshenv` — all with
 pre-modification backups, delimited blocks, and `--check` drift detection. Machine-local Ghostty
 settings go in `~/.config/ghostty/local.ghostty`, which that block includes last so that it wins.
+Yazi has no such file: it reads one directory, and that directory is the repo's `yazi/`.
 
 The rest stays, and stays here:
 
@@ -433,6 +488,7 @@ The rest stays, and stays here:
 | [4. Herdr notifications](#4-herdr-notifications) | Herdr has no include mechanism; agent settings unmanaged per ADR 0005 |
 | [5. Allow notifications and make them stay on screen](#5-allow-notifications-and-make-them-stay-on-screen) | two GUI toggles only you can flip |
 | [6. Known collisions to check](#6-known-collisions-to-check) | detection is automatable; the remedy edits files this repo does not manage |
+| [7. Yazi icons in Zed's terminal](#7-yazi-icons-in-zeds-terminal) | Zed's settings are unmanaged per ADR 0005 |
 
 One rule outlives the prune: **a command that writes to `$HOME` appears exactly once in this
 repository.** If a procedure ever comes back out of `install.sh`, it comes back to this file — not
