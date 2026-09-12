@@ -22,3 +22,18 @@
 	# origin/main into feat/x therefore leaves no upstream, which is exactly the
 	# state autoSetupRemote handles. Requires git >= 2.37.
 	autoSetupMerge = simple
+
+[alias]
+	# Review with hunk instead of the plain pager: `git hdiff`, `git hshow`,
+	# `git hlog`. The real commands keep their normal output -- nothing here
+	# sets core.pager, so scripts and muscle memory are untouched.
+	#
+	# The GIT_PREFIX wrapper is not decoration. Git runs a `!` alias from the
+	# top level of the worktree, so a bare `!hunk diff` silently resolves a
+	# relative pathspec against the repo root: `git hdiff -- notes.md` typed in
+	# docs/ would match nothing and print an empty review. Git exports the
+	# original directory as GIT_PREFIX, and cd-ing back to it restores the
+	# pathspec semantics every other git command has. See docs/hunk.md.
+	hdiff = "!f() { cd \"${GIT_PREFIX:-.}\" && hunk diff \"$@\"; }; f"
+	hshow = "!f() { cd \"${GIT_PREFIX:-.}\" && hunk show \"$@\"; }; f"
+	hlog = "!f() { cd \"${GIT_PREFIX:-.}\" && hunk log \"$@\"; }; f"

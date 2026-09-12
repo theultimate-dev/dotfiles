@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Three git aliases for reviewing with hunk (`git/.gitconfig`): `git hdiff`, `git hshow` and
+  `git hlog`, sitting beside the git commands they mirror. They arrive through the existing
+  `[include]`, so they work as soon as you pull, with no `./install.sh` re-run. Nothing sets
+  `core.pager`, so `git diff`, `git show` and `git log` keep their normal output. Each alias
+  cd's back to `GIT_PREFIX` first, because git runs a `!` alias from the top of the worktree: the
+  obvious one-line form resolves a relative pathspec against the repo root instead, and
+  `git hdiff -- notes.md` typed in a subdirectory would print an empty review with no error.
 - `install.sh` gained `apply_copy`, a second placement primitive beside `apply_block`, for a
   destination whose tool offers no include mechanism at all. It backs up what was there, writes
   atomically, reports drift under `--check`, and leaves an unchanged install a true no-op.
