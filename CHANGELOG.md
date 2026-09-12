@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `install.sh` gained `apply_copy`, a second placement primitive beside `apply_block`, for a
+  destination whose tool offers no include mechanism at all. It backs up what was there, writes
+  atomically, reports drift under `--check`, and leaves an unchanged install a true no-op.
+- Decision record `docs/decisions/0011-copy-the-hunk-config-and-report-drift.md`, recording why
+  the hunk configuration is copied rather than included or exported, and what that costs: the repo
+  stops being the live source of truth for that one file, and `prompt_save_view_preferences` has
+  to stay off or hunk rewrites a file the installer owns.
 - hunk (`hunk/config.toml`), the fourth managed config and a live diff pane for agent work:
   `hunk diff --watch` renders the whole working tree, untracked files included, and redraws itself
   as a coding agent edits, so a Herdr pane beside the agent shows the change while it happens

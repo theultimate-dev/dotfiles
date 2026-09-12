@@ -4,11 +4,14 @@
 #
 # Composes with existing configs by writing native include stubs inside
 # named delimited blocks. Never creates symlinks. Never touches the network.
+# One destination has no include mechanism of any kind and is a byte copy
+# instead; there, drift is reported rather than prevented.
 #
 # Destinations:
 #   ~/.config/git/config              [include] path = <repo>/git/.gitconfig
 #   ~/.config/ghostty/config.ghostty  config-file = <repo>/ghostty/config.ghostty
 #   ~/.zshenv                         export YAZI_CONFIG_HOME=<repo>/yazi
+#   ~/.config/hunk/config.toml        byte copy of <repo>/hunk/config.toml
 #
 # Flags:
 #   --dry-run   Show planned actions without modifying any files.
@@ -50,6 +53,7 @@ Destinations:
   ~/.config/git/config              include of <repo>/git/.gitconfig
   ~/.config/ghostty/config.ghostty  include of <repo>/ghostty/config.ghostty
   ~/.zshenv                         export of YAZI_CONFIG_HOME=<repo>/yazi
+  ~/.config/hunk/config.toml        byte copy of <repo>/hunk/config.toml
 
 Options:
   --dry-run   Show what would be changed without touching any files
@@ -235,6 +239,79 @@ apply_block() {
   fi
 }
 
+# apply_copy TARGET SOURCE
+#
+# Owns TARGET outright: its contents become a byte copy of SOURCE. Used only
+# where the tool offers no include directive and no config-path variable, so
+# there is nothing to redirect with — see AGENTS.md, "Adding a new destination".
+#
+# The trade this makes, and it is the whole reason apply_block is preferred:
+# the repo is not the live source of truth here. An edit to SOURCE reaches the
+# machine on the next ./install.sh and not before, and --check is what reports
+# the gap in the meantime. Anything already at TARGET is backed up before the
+# first overwrite, never replaced silently.
+apply_copy() {
+  local target="$1"
+  local source="$2"
+  local target_dir
+  target_dir="$(dirname "$target")"
+
+  if [[ ! -f "$source" ]]; then
+    err "$source is missing; cannot place $target."
+    exit 1
+  fi
+
+  local rel_source="${source#$DOTFILES/}"
+
+  if [[ ! -f "$target" ]]; then
+    if [[ "$CHECK" -eq 1 ]]; then
+      echo "drift: $target does not exist"
+      DRIFT=1
+      return
+    elif [[ "$DRY_RUN" -eq 1 ]]; then
+      echo "would create $target as a copy of $rel_source"
+      return
+    else
+      mkdir -p "$target_dir"
+      local tmp_file="${target}.tmp.$$"
+      cat "$source" > "$tmp_file"
+      mv "$tmp_file" "$target"
+      record_manifest "CREATE" "$target" "copy of $rel_source"
+      echo "created $target from $rel_source"
+      return
+    fi
+  fi
+
+  if cmp -s "$source" "$target"; then
+    if [[ "$CHECK" -eq 0 && "$DRY_RUN" -eq 0 ]]; then
+      echo "ok: $target is up to date"
+    fi
+    return
+  fi
+
+  if [[ "$CHECK" -eq 1 ]]; then
+    echo "drift: $target differs from $rel_source"
+    DRIFT=1
+    return
+  fi
+
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    echo "would replace $target with $rel_source (the current file is backed up first)"
+    return
+  fi
+
+  # Apply atomically. cp -p first so the temp file carries the destination's
+  # mode; the redirect below then replaces its contents.
+  backup_file "$target"
+  local tmp_file="${target}.tmp.$$"
+  cp -p "$target" "$tmp_file"
+  cat "$source" > "$tmp_file"
+  mv "$tmp_file" "$target"
+  record_manifest "REPLACE" "$target" "copy of $rel_source"
+  echo "replaced $target with the managed copy of $rel_source"
+}
+
+
 XDG_CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}"
 NL=$'\n'
 
@@ -399,6 +476,33 @@ EOT
 )"
 
 apply_block "$ZSHENV" "$ZSHENV_BLOCK_CONTENT" append
+
+# ── 4. hunk configuration ─────────────────────────────────────────────────
+step "hunk configuration"
+
+# hunk has neither an include directive nor a config-path variable, and a
+# delimited block cannot share a TOML file: a key repeated inside and outside
+# the block is a parse error, not an override. So this destination is owned
+# outright, as a byte copy. See
+# docs/decisions/0011-copy-the-hunk-config-and-report-drift.md.
+HUNK_DIR="$XDG_CONFIG_DIR/hunk"
+HUNK_CONFIG="$HUNK_DIR/config.toml"
+
+# Symlink checks: refuse to write through a symlink
+if [[ -L "$HUNK_CONFIG" ]]; then
+  err "$HUNK_CONFIG is a symlink. Refusing to modify."
+  exit 1
+fi
+if [[ -L "$HUNK_DIR" ]]; then
+  err "$HUNK_DIR is a symlink. Refusing to modify."
+  exit 1
+fi
+
+# The layer above this file is a per-project .hunk/config.toml at a repository
+# root, which wins over it for that repository alone. Nothing here can see
+# those: if hunk ignores a key set in the repo, look for one of them first.
+
+apply_copy "$HUNK_CONFIG" "$DOTFILES/hunk/config.toml"
 
 # ── Summary ────────────────────────────────────────────────────────────────
 if [[ "$CHECK" -eq 1 ]]; then
