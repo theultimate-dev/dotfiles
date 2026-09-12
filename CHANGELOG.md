@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `Brewfile`: `hunk`, the review-first terminal diff viewer this repo now configures, and `gh`,
+  the GitHub CLI that feeds it a pull request (`gh pr diff N | hunk patch -`, no clone and no
+  checkout needed). Re-run `./setup.sh` to get both.
 - Yazi configuration (`yazi/`), the third managed config: files open in micro, a `.md` file opens
   in glow's pager with micro one pick-menu entry away, the preview pane renders Markdown through
   glow, and a git status mark sits next to every changed file and directory. Yazi is reached
