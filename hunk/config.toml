@@ -1,0 +1,58 @@
+# hunk configuration — The Ultimate Dev / dotfiles (public).
+#
+# hunk is the live diff pane: `hunk diff --watch` beside a running coding agent
+# redraws the whole working tree as the agent writes it. See docs/hunk.md.
+#
+# Delivery, the part that bites: this file is COPIED to
+# ~/.config/hunk/config.toml by install.sh, not included from there. hunk has no
+# include directive, no config-path flag and no config-path variable, and a
+# delimited block cannot share a TOML file — a duplicate key is a parse error,
+# not an override. So unlike every other config in this repo, the repo is not
+# the live source of truth here: edit this file and re-run ./install.sh, and use
+# `./install.sh --check` to find out when the two have drifted apart.
+# See docs/decisions/0011-copy-the-hunk-config-and-report-drift.md.
+#
+# There is no machine-local override layer. The only layer above this one is a
+# per-project .hunk/config.toml at a repository root, which wins over this file
+# for that repository alone.
+#
+# Tested with hunk 0.22.0.
+
+# ── View ──────────────────────────────────────────
+# Follows the terminal's appearance, the same policy as the Ghostty theme.
+theme = "auto"
+
+# Split when the pane is wide, unified when it is narrow. A Herdr pane next to
+# a running agent is usually narrow, and a side-by-side diff at that width is
+# two columns of wrapped noise.
+mode = "auto"
+
+sidebar = "auto"
+line_numbers = true
+tab_width = 2
+wrap_lines = false
+
+# ── Review ────────────────────────────────────────
+vcs = "git"
+
+# The file an agent just created is the one you most want to look at, so
+# untracked files stay in the diff.
+exclude_untracked = false
+
+# Render the annotations an agent leaves on a review inline, beside the code
+# they describe, rather than dropping them.
+agent_notes = true
+
+# ── Watch ─────────────────────────────────────────
+# Off by default so `hunk diff` stays a one-shot review. The live pane opts in
+# per invocation with `hunk diff --watch`, which is the whole point of running
+# it beside an agent.
+watch = false
+
+# ── Do not write to this file ─────────────────────
+# install.sh owns ~/.config/hunk/config.toml outright. hunk otherwise offers, on
+# quit, to persist whatever view preferences you changed during a session — into
+# this very destination. Accepting that prompt would put the destination
+# permanently at odds with the repo, and `--check` would report drift you did
+# not cause. Turning the prompt off is what keeps the copy convergent.
+prompt_save_view_preferences = false

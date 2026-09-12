@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- hunk (`hunk/config.toml`), the fourth managed config and a live diff pane for agent work:
+  `hunk diff --watch` renders the whole working tree, untracked files included, and redraws itself
+  as a coding agent edits, so a Herdr pane beside the agent shows the change while it happens
+  instead of afterwards. It is read-only, so a keystroke in that pane cannot stage or commit
+  anything. Re-run `./setup.sh` (installs hunk) then `./install.sh`. Unlike every other config
+  here, this one is **copied** to `~/.config/hunk/config.toml` rather than included from it — hunk
+  offers no include directive and no config variable, and a shared block is impossible because a
+  repeated TOML key is a parse error. The consequence to know: editing `hunk/config.toml` needs a
+  `./install.sh` re-run to take effect, and `./install.sh --check` reports when the two have
+  drifted apart. Anything already at the destination is backed up first.
 - `Brewfile`: `hunk`, the review-first terminal diff viewer this repo now configures, and `gh`,
   the GitHub CLI that feeds it a pull request (`gh pr diff N | hunk patch -`, no clone and no
   checkout needed). Re-run `./setup.sh` to get both.
