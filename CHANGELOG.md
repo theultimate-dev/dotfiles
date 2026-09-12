@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Guide to hunk (`docs/hunk.md`), covering the live pane workflow beside a running agent, why a
+  read-only viewer beats an interactive git client there, the TOML rule that rules out a shared
+  block, the save-preferences trap, and what is deliberately left out — hunk as git's pager, and
+  its bundled Claude Code review skill.
+- The hunk guide now covers reviewing anything other than the working tree — a commit, a range,
+  what a branch adds to `main`, staged changes, browsable history, a stash, a patch file, and a
+  GitHub pull request — along with what hunk deliberately does not do: it is a local review layer
+  and posts no comment or approval back to GitHub.
 - Three git aliases for reviewing with hunk (`git/.gitconfig`): `git hdiff`, `git hshow` and
   `git hlog`, sitting beside the git commands they mirror. They arrive through the existing
   `[include]`, so they work as soon as you pull, with no `./install.sh` re-run. Nothing sets

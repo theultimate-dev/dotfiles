@@ -82,6 +82,7 @@ repo using the target tool's own native include directive:
 | `~/.config/git/config` — never `~/.gitconfig` | `[include] path = <repo>/git/.gitconfig` |
 | `~/.config/ghostty/config.ghostty` | `config-file = <repo>/ghostty/config.ghostty` |
 | `~/.zshenv` | `export YAZI_CONFIG_HOME=<repo>/yazi` — Yazi has no include directive; the variable names the directory |
+| `~/.config/hunk/config.toml` | byte copy — hunk offers no include directive and no config variable |
 | `~/.tool-versions` | byte copy — asdf has no include mechanism |
 | `scripts/` | added to `$PATH`; no file installed |
 
@@ -140,14 +141,15 @@ Installation follows the two-script split:
 The split exists so that config placement never depends on the network and stays debuggable on a
 half-broken machine.
 
-`setup.sh` installs the daily tools via Homebrew (Ghostty, micro, Yazi and glow with the tools
-Yazi previews through, Zed, T3 Code, Herdr, and coding agent CLIs), restores Yazi's plugins from
-the tracked lockfile, and configures Herdr agent integrations. Re-running it is safe and
+`setup.sh` installs the daily tools via Homebrew (Ghostty, micro, hunk, Yazi and glow with the
+tools Yazi previews through, Zed, T3 Code, Herdr, and coding agent CLIs), restores Yazi's plugins
+from the tracked lockfile, and configures Herdr agent integrations. Re-running it is safe and
 convergent. An app installed by hand before is left alone and reported; `./setup.sh --adopt`
 hands it to Homebrew, after explaining the macOS permission prompt that needs.
 
-`install.sh` places configuration stubs using native include directives and named delimited blocks.
-It supports two non-destructive flags:
+`install.sh` places configuration stubs using native include directives and named delimited blocks,
+and copies the one config whose tool offers no include mechanism at all. It supports two
+non-destructive flags:
 
 - `./install.sh --dry-run` — preview planned changes without modifying any files.
 - `./install.sh --check` — verify drift against expected stubs; exits 0 if current, 1 if drifted.
@@ -168,6 +170,7 @@ see [Manual setup](docs/manual-setup.md).
 | `git/` | Managed git configuration |
 | `ghostty/` | Managed Ghostty configuration |
 | `yazi/` | Managed Yazi configuration; `plugins/` inside it is restored by `setup.sh` and untracked |
+| `hunk/` | Managed hunk configuration; copied to its destination rather than included |
 | [`LICENSE`](LICENSE) | MIT — see [Licence and scope](#licence-and-scope) |
 | `docs/` | Deep dives on the pieces whose reasoning is not obvious from the code |
 | [`docs/decisions/`](docs/decisions/) | Architecture decision records — why a choice was made, and what was rejected |
@@ -187,6 +190,12 @@ see [Manual setup](docs/manual-setup.md).
   repo never writes your `~/.gitconfig`, and
   [0010](docs/decisions/0010-export-a-config-directory-variable-from-zshenv.md) for the one tool
   reached through an environment variable instead of a stub.
+- [hunk](docs/hunk.md) — a live diff pane for watching a coding agent edit the working tree as it
+  happens, rather than reading the whole changeset afterwards, plus how to review a commit, a
+  branch or a GitHub pull request with the same viewer. Also: why a read-only viewer beats a git
+  client in a pane beside a running agent, why this one config is copied instead of included, the
+  TOML rule that makes a shared block impossible, and the git alias trap that makes a relative
+  pathspec vanish.
 - [Yazi](docs/yazi.md) — a terminal file manager that opens files in micro, reads Markdown in
   glow with micro one menu away, renders Markdown in its preview pane, and marks git status next
   to every file. Also: why its config is delivered through `YAZI_CONFIG_HOME` in `~/.zshenv`

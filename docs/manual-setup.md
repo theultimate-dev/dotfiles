@@ -27,7 +27,8 @@ symlink, and no step overwrites a file wholesale:
 
 `install.sh` in step 1 additionally writes three managed blocks — the include stubs
 `~/.config/git/config` and `~/.config/ghostty/config.ghostty`, and an `export` of `YAZI_CONFIG_HOME`
-in `~/.zshenv` — and takes its own backups before touching any of them. Steps 1 to 3 also install
+in `~/.zshenv` — and one whole file, `~/.config/hunk/config.toml`, which it owns outright because
+hunk has no include mechanism to hook into. It takes its own backups before touching any of them. Steps 1 to 3 also install
 software and write credentials, but only into each tool's own configuration directory. Steps 2, 3
 and 5 are interactive — a browser login, a settings pane — and have no terminal equivalent.
 
@@ -38,7 +39,8 @@ and 5 are interactive — a browser login, a settings pane — and have no termi
 mkdir -p ~/.dotfiles-backup
 
 for f in ~/.config/herdr/config.toml ~/.claude/settings.json ~/.grok/config.toml \
-         ~/.config/ghostty/config.ghostty ~/.zshenv ~/.config/zed/settings.json; do
+         ~/.config/ghostty/config.ghostty ~/.zshenv ~/.config/zed/settings.json \
+         ~/.config/hunk/config.toml; do
   if [ -e "$f" ]; then
     cp -p "$f" ~/.dotfiles-backup/"$(printf '%s' "${f#$HOME/.}" | tr / -)"
     echo "saved:  $f"
@@ -477,6 +479,12 @@ configuration by appending an `export YAZI_CONFIG_HOME` block to `~/.zshenv` —
 pre-modification backups, delimited blocks, and `--check` drift detection. Machine-local Ghostty
 settings go in `~/.config/ghostty/local.ghostty`, which that block includes last so that it wins.
 Yazi has no such file: it reads one directory, and that directory is the repo's `yazi/`.
+
+The hunk configuration is the one destination it copies rather than includes, at
+`${XDG_CONFIG_HOME:-~/.config}/hunk/config.toml`. An edit made directly to that file does not
+survive the next run: change `hunk/config.toml` in the repo and re-run `./install.sh`, and use
+`./install.sh --check` to find out when the two have drifted apart. See
+[hunk](hunk.md#how-the-config-reaches-hunk).
 
 The rest stays, and stays here:
 

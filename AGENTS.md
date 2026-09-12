@@ -8,8 +8,8 @@ contributor. `CLAUDE.md` imports this file; Claude-specific notes live there and
 The public share of a personal macOS development stack — everything from a private `~/dotfiles`
 that can be made public and is worth sharing.
 
-**Current state:** the installer, the git defaults, the Ghostty configuration and the Yazi
-configuration are in; the rest is ported in over time.
+**Current state:** the installer, the git defaults, the Ghostty configuration, the Yazi
+configuration and the hunk configuration are in; the rest is ported in over time.
 The delivery model below is not aspirational — it is proven in the private original and is binding
 for every file that lands here.
 
@@ -53,6 +53,7 @@ using the target tool's *own* native include directive:
 | `~/.gitconfig` | `[include] path = <repo>/git/.gitconfig` |
 | `~/.config/ghostty/config.ghostty` | `config-file = <repo>/ghostty/config.ghostty` |
 | `~/.zshenv` | `export YAZI_CONFIG_HOME=<repo>/yazi` — the variable names the directory; see ADR 0010 |
+| `~/.config/hunk/config.toml` | byte copy — hunk has no include directive and no config variable; see ADR 0011 |
 | `~/.tool-versions` | byte copy — asdf has no include mechanism |
 | `scripts/` | `<repo>/scripts` prepended to `$PATH`; no file installed |
 
@@ -128,6 +129,7 @@ only when it does not.
 | **Ghostty** | the **repo** — `config-file` is processed at the *end* of the containing file | `~/.config/ghostty/local.ghostty` |
 | **zsh** | **local** — later lines win | `~/.config/dotfiles/local.zsh`, sourced last |
 | **Yazi** | the **repo** — it is the only directory Yazi reads | none; a different `YAZI_CONFIG_HOME` exported below the block in `~/.zshenv` |
+| **hunk** | the **repo** — the installer owns the destination outright | none machine-wide; a per-project `.hunk/config.toml` overrides it for one repository |
 
 Practical consequence: `git config --global …` writes into `~/.gitconfig`, not into this repo, and
 wins over it. That is intentional — `~/.gitconfig` is the machine-local override layer — but it
@@ -210,7 +212,7 @@ Format is `type(scope): description`, per
 
 - **Descriptions are past tense** — `feat(zsh): added a notification for long-running commands`.
 - **Scope is optional but preferred**, naming the top-level directory or subject: `install`,
-  `setup`, `zsh`, `git`, `ghostty`, `yazi`, `scripts`, `brew`, `asdf`, `docs`, `claude`.
+  `setup`, `zsh`, `git`, `ghostty`, `yazi`, `hunk`, `scripts`, `brew`, `asdf`, `docs`, `claude`.
 - **One self-contained unit of work per commit.** Unrelated changes get their own commits; when the
   working tree mixes them, split rather than bundle.
 - **Breaking changes** — anything in the MAJOR row above — take a `!` after the type or scope *and*
