@@ -195,6 +195,10 @@ The parts that are easy to get wrong:
   changed for someone running these dotfiles, and what they have to do about it.
 - An `[Unreleased]` section stays at the top at all times.
 - Version headings resolve through link references kept at the bottom of the file.
+- A release is `[Unreleased]` renamed to `[X.Y.Z] - YYYY-MM-DD` with a fresh empty `[Unreleased]`
+  above it, then an annotated `vX.Y.Z` tag on `main`. The `Release` workflow turns the pushed tag
+  into a GitHub Release whose notes are that version's section, verbatim. There are no version files
+  to bump, and nobody creates a release by hand.
 - Released entries are not edited or deleted. A mistake in a released entry is corrected by a new
   entry, not by rewriting the old one. Entries still under `[Unreleased]` may be folded together or
   corrected freely: nobody has shipped them yet.

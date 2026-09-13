@@ -84,6 +84,9 @@ reasoning behind each recorded in `docs/` and `docs/decisions/`.
   notification channel across hosts; the Ghostty block inserted first; a config directory exported
   from `~/.zshenv`; and the hunk config copied with drift reported — each with the alternative that
   lost — and an index (`docs/decisions/README.md`) that states each decision in a sentence.
+- Release workflow (`.github/workflows/release.yml`): a pushed `vX.Y.Z` tag on `main` becomes a
+  GitHub Release whose notes are that version's section of this file. It refuses a tag that is not
+  on `main` or has no changelog section, and uses only `actions/checkout` and the GitHub CLI.
 - `.ignore` file that keeps the untracked `spec/` directory readable by search tools, so
   implementation specs stay out of version control without becoming invisible to coding agents.
 - MIT licence, covering the configuration and documentation in this repository. The third-party

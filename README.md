@@ -297,6 +297,9 @@ This repo runs on [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/)
 [Michael Nygard's ADR format](https://cognitect.com/blog/2011/11/15/documenting-architecture-decisions)
 for [`docs/decisions/`](docs/decisions/README.md).
 
+Releases are cut from tags: a `vX.Y.Z` tag on `main` becomes a GitHub Release whose notes are that
+version's section of the changelog.
+
 ## Licence and scope
 
 The configuration, scripts, and documentation in this repository are MIT licensed — see

@@ -1,0 +1,71 @@
+# Turns a pushed vX.Y.Z tag on main into a GitHub Release.
+# Notes come from that version's section in CHANGELOG.md. Uses only actions/checkout and the gh CLI on the runner.
+# Install at .github/workflows/release.yml. If the default branch is not main, replace main in the two places below.
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      TAG: ${{ github.ref_name }}
+    steps:
+      - name: Check tag shape
+        run: |
+          [[ "$TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?$ ]] \
+            || { echo "::error::Tag '$TAG' is not vMAJOR.MINOR.PATCH[-prerelease]"; exit 1; }
+
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Verify the tagged commit is on main
+        run: |
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          SHA="$(git rev-parse "${TAG}^{commit}")"
+          git merge-base --is-ancestor "$SHA" origin/main \
+            || { echo "::error::Tag $TAG points at $SHA, which is not on main. Releases come from main only."; exit 1; }
+
+      - name: Extract release notes from CHANGELOG.md
+        run: |
+          VERSION="${TAG#v}"
+          awk -v ver="$VERSION" '
+            BEGIN { head = "## [" ver "]"; n = length(head) }
+            /^[ \t]*(```|~~~)/ { fence = !fence; if (inside) print; next }
+            fence              { if (inside) print; next }
+            /^\[[^]]+\]: /     { if (inside) exit; next }
+            /^## /             { if (inside) exit; if (substr($0, 1, n) == head) inside = 1; next }
+            inside             { print }
+          ' CHANGELOG.md > "$RUNNER_TEMP/notes.md"
+          if [ -z "$(tr -d '[:space:]' < "$RUNNER_TEMP/notes.md")" ]; then
+            echo "::error::CHANGELOG.md has no entries under '## [$VERSION]'. Release the changelog before tagging."; exit 1
+          fi
+
+      # Projects that ship files add a packaging step here and pass the files to gh release create / upload.
+
+      - name: Create the GitHub Release
+        run: |
+          VERSION="${TAG#v}"
+          prerelease=()
+          [[ "$VERSION" == *-* ]] && prerelease=(--prerelease)
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists; nothing to do."
+          else
+            gh release create "$TAG" \
+              --title "$TAG" \
+              --notes-file "$RUNNER_TEMP/notes.md" \
+              --verify-tag \
+              "${prerelease[@]}"
+          fi
