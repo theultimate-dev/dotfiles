@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Security policy (`SECURITY.md`): what counts as a security issue for a repository that writes
+  into `$HOME` — a write outside the documented destinations, a silent clobber, a symlink, or
+  leaked identity — and where to report one privately through GitHub's vulnerability reporting
+  form, so no contact address lives in the repository.
+
 ## [0.1.0] - 2026-09-13
 
 The first release: the installer, the tool list, and four managed configurations, with the
