@@ -3,6 +3,7 @@ brew "terminal-notifier"  # required in practice by docs/herdr-notifications.md
 brew "micro"              # terminal editor for quick edits next to a running agent; upstream README lists brew
 brew "hunk"               # live working-tree diff viewer for agent panes; modem-dev/hunk, NOT hunk.nvim
 brew "gh"                 # GitHub CLI; `gh pr diff N | hunk patch -` is the PR review path, see docs/hunk.md
+brew "figlet"             # banner text for screenshots and demos: figlet -f slant "The Ultimate Dev"
 
 brew "yazi"               # terminal file manager; reached through YAZI_CONFIG_HOME, see docs/yazi.md
 brew "glow"               # markdown reader; Yazi's *.md opener and its preview pane
