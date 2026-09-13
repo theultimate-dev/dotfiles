@@ -402,9 +402,16 @@ for p in "$DOTFILES" "$GHOSTTY_LOCAL"; do
   esac
 done
 
-# Ghostty also reads its Application Support directory, after the XDG files.
-# Keys there lose to every config-file include anyway, but a config-file line
-# there that repeats one of ours makes Ghostty report "cycle detected".
+# Ghostty also reads the classic file name beside ours, and its Application
+# Support directory after the XDG files. Keys in any of those lose to every
+# config-file include, so settings an existing user keeps in the classic
+# ~/.config/ghostty/config are silently overridden by the repo after this
+# install; local.ghostty is where they win again. A config-file line in one
+# of those files that repeats one of ours makes Ghostty report "cycle
+# detected".
+if [[ -s "$GHOSTTY_DIR/config" ]]; then
+  warn "$GHOSTTY_DIR/config is non-empty; Ghostty loads it too, and its keys lose to the repo's config-file. Move overrides to $GHOSTTY_LOCAL."
+fi
 for f in "$HOME/Library/Application Support/com.mitchellh.ghostty/config" \
          "$HOME/Library/Application Support/com.mitchellh.ghostty/config.ghostty"; do
   if [[ -s "$f" ]]; then
