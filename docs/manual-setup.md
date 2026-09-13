@@ -28,9 +28,10 @@ symlink, and no step overwrites a file wholesale:
 `install.sh` in step 1 additionally writes three managed blocks — the include stubs
 `~/.config/git/config` and `~/.config/ghostty/config.ghostty`, and an `export` of `YAZI_CONFIG_HOME`
 in `~/.zshenv` — and one whole file, `~/.config/hunk/config.toml`, which it owns outright because
-hunk has no include mechanism to hook into. It takes its own backups before touching any of them. Steps 1 to 3 also install
-software and write credentials, but only into each tool's own configuration directory. Steps 2, 3
-and 5 are interactive — a browser login, a settings pane — and have no terminal equivalent.
+hunk has no include mechanism to hook into. It takes its own backups before touching any of them.
+Steps 1 to 3 also install software and write credentials, but only into each tool's own
+configuration directory. Steps 2, 3 and 5 are interactive — a browser login, a settings pane — and
+have no terminal equivalent.
 
 **Snapshot.** Do this once, before step 1. It is the difference between "I changed something" and
 "I can put it back":
@@ -168,22 +169,32 @@ Configuration placement is kept strictly offline in `install.sh` to adhere to th
 
 ---
 
-## 2. Authenticate the coding agents
+## 2. Install and authenticate the coding agents
 
-**What you get.** `codex`, `copilot`, `grok` and `agy` start straight into their own prompt instead
-of opening a browser or printing a device code.
+**What you get.** `claude`, `codex`, `copilot`, `grok` and `agy` start straight into their own
+prompt instead of opening a browser or printing a device code.
 
-**Do this.** One at a time. Each opens a browser and waits for you to finish there:
+**Do this.** Claude Code first, because it is the one agent the `Brewfile` does not install: its
+native installer puts the self-updating binary in `~/.local/bin`, and the Homebrew cask would only
+add a stale second copy — see
+[Agent tooling](agent-tooling.md#specific-tools-deliberately-handled-differently).
 
 ```sh
+curl -fsSL https://claude.ai/install.sh | bash
+```
+
+Then the logins, one at a time. Each opens a browser and waits for you to finish there:
+
+```sh
+claude           # Anthropic, browser login
 codex            # OpenAI, browser login
 copilot          # GitHub, browser login
 grok             # xAI, browser login
 agy auth login   # Google, browser login
 ```
 
-Credentials land in each agent's own configuration directory — `~/.codex`, `~/.copilot`, `~/.grok`,
-`~/.gemini`. Nothing in this repo reads, ships, or backs them up.
+Credentials land in each agent's own configuration directory — `~/.claude`, `~/.codex`,
+`~/.copilot`, `~/.grok`, `~/.gemini`. Nothing in this repo reads, ships, or backs them up.
 
 **Verify.** Start each one again:
 
@@ -195,9 +206,11 @@ An authenticated CLI drops you at its prompt. If it opens a browser, prints a de
 it is not signed in, that agent still needs this step. There is no scriptable check here; the answer
 is what the program does on screen.
 
-**Undo.** Use the agent's own sign-out subcommand where it has one — `agy auth --help`, and the
-equivalent for the others, will say. Failing that, quit the agent and delete the credential file its
-login created in the directory listed above, then revoke the session at the provider.
+**Undo.** Use the agent's own sign-out subcommand where it has one — `claude auth logout`,
+`agy auth --help`, and the equivalent for the others, will say. Failing that, quit the agent and
+delete the credential file its login created in the directory listed above, then revoke the session
+at the provider. Claude Code itself is removed by deleting `~/.local/bin/claude` and
+`~/.local/share/claude`.
 
 **Why it works this way.** Every agent owns its own credential store, and this repo ships no tokens
 and no identity at all — see [Public-repo hygiene](../AGENTS.md#public-repo-hygiene).
@@ -218,8 +231,8 @@ open "/Applications/T3 Code (Alpha).app"
 In the app's settings, add an API key for at least one provider. T3 Code is an alpha GUI control
 plane rather than a CLI, so there is no flag for this and no file in this repo to edit.
 
-Leave the keys in the app. If you also need them in your shell, they belong in
-`~/.config/dotfiles/local.zsh` — untracked, `chmod 600` — and never in a file this repo tracks.
+Leave the keys in the app. If you also need them in your shell, they belong in a file of your own
+that your shell sources — outside this repo, `chmod 600` — and never in a file this repo tracks.
 
 **Verify.** Start a session in the app. It responds, rather than reporting a missing or invalid API
 key. This is a GUI check; there is nothing to run in a terminal.
@@ -491,7 +504,7 @@ The rest stays, and stays here:
 | Step | Why no installer takes it over |
 |---|---|
 | [1. Install the tools and place configs](#1-install-the-tools-and-place-configs) | the two-script split: `setup.sh` needs the network, `install.sh` may not |
-| [2. Authenticate the coding agents](#2-authenticate-the-coding-agents) | interactive OAuth; nothing types a password into a browser for you |
+| [2. Install and authenticate the coding agents](#2-install-and-authenticate-the-coding-agents) | interactive OAuth; nothing types a password into a browser for you |
 | [3. Configure T3 Code](#3-configure-t3-code) | provider API keys are secrets, and this repo ships none |
 | [4. Herdr notifications](#4-herdr-notifications) | Herdr has no include mechanism; agent settings unmanaged per ADR 0005 |
 | [5. Allow notifications and make them stay on screen](#5-allow-notifications-and-make-them-stay-on-screen) | two GUI toggles only you can flip |

@@ -7,160 +7,87 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-09-13
+
+The first release: the installer, the tool list, and four managed configurations, with the
+reasoning behind each recorded in `docs/` and `docs/decisions/`.
+
 ### Added
 
-- Guide to hunk (`docs/hunk.md`), covering the live pane workflow beside a running agent, why a
-  read-only viewer beats an interactive git client there, the TOML rule that rules out a shared
-  block, the save-preferences trap, and what is deliberately left out — hunk as git's pager, and
-  its bundled Claude Code review skill.
-- The hunk guide now covers reviewing anything other than the working tree — a commit, a range,
-  what a branch adds to `main`, staged changes, browsable history, a stash, a patch file, and a
-  GitHub pull request — along with what hunk deliberately does not do: it is a local review layer
-  and posts no comment or approval back to GitHub.
-- Three git aliases for reviewing with hunk (`git/.gitconfig`): `git hdiff`, `git hshow` and
-  `git hlog`, sitting beside the git commands they mirror. They arrive through the existing
-  `[include]`, so they work as soon as you pull, with no `./install.sh` re-run. Nothing sets
-  `core.pager`, so `git diff`, `git show` and `git log` keep their normal output. Each alias
-  cd's back to `GIT_PREFIX` first, because git runs a `!` alias from the top of the worktree: the
-  obvious one-line form resolves a relative pathspec against the repo root instead, and
-  `git hdiff -- notes.md` typed in a subdirectory would print an empty review with no error.
-- `install.sh` gained `apply_copy`, a second placement primitive beside `apply_block`, for a
-  destination whose tool offers no include mechanism at all. It backs up what was there, writes
-  atomically, reports drift under `--check`, and leaves an unchanged install a true no-op.
-- Decision record `docs/decisions/0011-copy-the-hunk-config-and-report-drift.md`, recording why
-  the hunk configuration is copied rather than included or exported, and what that costs: the repo
-  stops being the live source of truth for that one file, and `prompt_save_view_preferences` has
-  to stay off or hunk rewrites a file the installer owns.
-- hunk (`hunk/config.toml`), the fourth managed config and a live diff pane for agent work:
-  `hunk diff --watch` renders the whole working tree, untracked files included, and redraws itself
-  as a coding agent edits, so a Herdr pane beside the agent shows the change while it happens
-  instead of afterwards. It is read-only, so a keystroke in that pane cannot stage or commit
-  anything. Re-run `./setup.sh` (installs hunk) then `./install.sh`. Unlike every other config
-  here, this one is **copied** to `~/.config/hunk/config.toml` rather than included from it — hunk
-  offers no include directive and no config variable, and a shared block is impossible because a
-  repeated TOML key is a parse error. The consequence to know: editing `hunk/config.toml` needs a
-  `./install.sh` re-run to take effect, and `./install.sh --check` reports when the two have
-  drifted apart. Anything already at the destination is backed up first.
-- `Brewfile`: `hunk`, the review-first terminal diff viewer this repo now configures, and `gh`,
-  the GitHub CLI that feeds it a pull request (`gh pr diff N | hunk patch -`, no clone and no
-  checkout needed). Re-run `./setup.sh` to get both.
-- Yazi configuration (`yazi/`), the third managed config: files open in micro, a `.md` file opens
-  in glow's pager with micro one pick-menu entry away, the preview pane renders Markdown through
-  glow, and a git status mark sits next to every changed file and directory. Yazi is reached
-  through `YAZI_CONFIG_HOME`, which `install.sh` exports from a block appended to `~/.zshenv`; the
-  repo directory is Yazi's config directory, so there is no machine-local override file for it.
-  Re-run `./setup.sh` (installs Yazi and restores its two plugins) then `./install.sh`, and open a
-  new shell. Yazi 25 or newer is required for the opener syntax.
-- Decision record `docs/decisions/0010-export-a-config-directory-variable-from-zshenv.md`,
-  recording why Yazi is pointed at the repo through an environment variable in `~/.zshenv` rather
-  than an include stub or a byte copy, and what that costs.
-- `Brewfile`: `yazi` and `glow`, the tools Yazi previews through (`fd`, `ripgrep`, `fzf`,
-  `zoxide`, `poppler`, `ffmpeg`, `imagemagick`, `jq`, `sevenzip`, `resvg`), and the
-  `font-symbols-only-nerd-font` cask that Zed's terminal needs for Yazi's icons; Ghostty has them
-  built in.
-- `setup.sh`: restores Yazi's plugins from the tracked `yazi/package.toml` lockfile with `ya pkg
-  install`, after the Brewfile step.
-- `docs/yazi.md`, the deep dive on the Yazi setup, and step 7 in `docs/manual-setup.md` for the
-  Zed font fallback.
-- Ghostty configuration (`ghostty/config.ghostty`), the second managed config: font, a theme that
-  follows the macOS appearance, window and clipboard behaviour, shell integration, and the
-  notification settings that turn an agent's escape sequences into macOS notifications.
-  `install.sh` reaches it through a `config-file` block placed at the top of
-  `~/.config/ghostty/config.ghostty`; machine-local overrides go in
-  `~/.config/ghostty/local.ghostty`, which that block includes last. Re-run `./install.sh` to get
-  it; Ghostty 1.2.3 or newer is required for the file name.
-- Decision record `docs/decisions/0008-keep-one-agent-notification-channel-across-hosts.md`,
-  recording why `iterm2_with_bell` stays the only Claude Code notification setting across Zed,
-  Ghostty and Herdr, why persistence is left to the macOS alert style, and which alternatives lost.
-- Decision record `docs/decisions/0009-insert-the-ghostty-block-first.md`, recording why the
-  Ghostty include block goes first in the destination file: Ghostty applies every `config-file`
-  after the whole file, in order, later file wins.
-- The `micro` terminal editor, installed through `Brewfile`, for quick edits next to a running
-  coding agent in Herdr or a plain terminal. Nothing sets `$EDITOR` to it yet; that arrives with
-  the zsh port.
-- `install.sh`: automated, offline configuration placement script depending strictly on macOS system
-  bash 3.2 and coreutils. Manages destination include stubs using named delimited blocks (`# BEGIN
-  dotfiles (public)` ... `# END dotfiles (public)`), with atomic temp-file writes, pre-modification
-  backups in `~/.dotfiles-backup/`, an empty `~/.gitconfig` creation guard, and non-destructive
-  `--dry-run` and `--check` drift detection.
-- Decision record `docs/decisions/0006-manage-shared-destinations-with-delimited-blocks.md`,
-  documenting why shared destination files are managed through named delimited blocks rather than
-  symlinks, wholesale rewrites, or single-sentinel schemes.
-- `Brewfile` and `setup.sh` to install daily macOS development tools and coding agents via Homebrew
-  (Ghostty, Zed, Herdr, T3 Code, OpenAI Codex, GitHub Copilot CLI, Google Antigravity CLI, and xAI
-  Grok Build), plus automated installation for Herdr session identity integrations. An app
-  already in `/Applications` that Homebrew did not install is listed and skipped;
-  `./setup.sh --adopt` hands it to Homebrew after checking the macOS App Management permission.
-- Decision record `docs/decisions/0007-leave-pre-existing-apps-unadopted-by-default.md`,
-  recording why `setup.sh` never adopts an app you installed by hand unless asked: adoption can
-  trigger a macOS permission dialog and a `sudo` prompt, and a refused dialog makes Homebrew's
-  rollback delete the app.
-- Decision records in `docs/decisions/`, in Michael Nygard's five-section ADR format, recording why
-  the delivery model is what it is: include stubs instead of symlinks, git included from
-  `~/.config/git/config`, Homebrew as the single install channel, auto-updating casks left to manage
-  themselves, and agent configuration deliberately unmanaged — each with the alternative that lost.
-- Git push defaults (`git/.gitconfig`), the first managed configuration in this repo: pushing a
-  new local branch now creates the matching remote branch and tracks it, instead of failing with a
-  name mismatch or pushing to the branch you started from. Requires git 2.37 or newer. Nothing
-  installs it automatically yet — `docs/manual-setup.md` has the one-line include that turns it on.
-- Guide to agent tooling (`docs/agent-tooling.md`), detailing package management decisions,
-  `auto_updates` cask behavior, and Herdr integration requirements and traps.
-- Guide to git push defaults (`docs/git-push-defaults.md`), covering why `push.autoSetupRemote`
-  alone does not create the remote branch, why the popular `push.default = current` workaround
-  leaves the upstream pointing at the wrong branch, and a git worktree branch-naming trap.
+- `install.sh`: offline configuration placement depending strictly on macOS system bash 3.2 and
+  coreutils. It writes native include stubs inside named delimited blocks (`# BEGIN dotfiles
+  (public)` ... `# END dotfiles (public)`), preserving every byte outside the block, with atomic
+  temp-file writes, pre-modification backups in `~/.dotfiles-backup/` with a manifest, and an empty
+  `~/.gitconfig` creation guard so `git config --global` never targets a managed file. Markers are
+  matched as whole lines, a destination carrying only one of the two markers is refused rather than
+  guessed at, and file permissions survive an in-place update. `--dry-run` previews and `--check`
+  reports drift with a non-zero exit. A second primitive, `apply_copy`, places the one config whose
+  tool has no include mechanism at all and reports drift instead of preventing it. The installer
+  warns when the classic `~/.config/ghostty/config` is non-empty, since Ghostty loads it too and the
+  repo's `config-file` include beats every key in it; `local.ghostty` is where those settings win
+  again.
+- `Brewfile` and `setup.sh`: Homebrew-based installation of the daily tool set — Ghostty, Zed, T3
+  Code, Herdr and `terminal-notifier`, micro, hunk and the GitHub CLI, figlet for banner text in
+  screenshots and demos, Yazi and glow with the tools Yazi previews through (`fd`, `ripgrep`, `fzf`,
+  `zoxide`, `poppler`, `ffmpeg`, `imagemagick`, `jq`, `sevenzip`, `resvg`), the
+  `font-symbols-only-nerd-font` cask for Yazi's icons in Zed's terminal, and the OpenAI Codex,
+  GitHub Copilot, Google Antigravity and xAI Grok Build agent CLIs — plus Herdr's session-identity
+  integration for every agent whose config directory exists, and Yazi's plugins restored from the
+  tracked lockfile. Re-running is safe and convergent. An app already in `/Applications` that
+  Homebrew did not install is listed and skipped; `./setup.sh --adopt` hands it to Homebrew after
+  checking the macOS App Management permission, so a refused dialog can no longer make Homebrew's
+  rollback delete the app. A failed `brew bundle` no longer stops the script: the remaining steps
+  run for what did install and the exit code is non-zero at the end.
+- Git push defaults (`git/.gitconfig`), included from `~/.config/git/config`: pushing a new local
+  branch creates the matching remote branch and tracks it, instead of failing with a name mismatch
+  or pushing to the branch you started from. Requires git 2.37 or newer. Three aliases open a
+  review in hunk beside the git commands they mirror — `git hdiff`, `git hshow`, `git hlog` — and
+  keep a relative pathspec working from a subdirectory. Nothing sets `core.pager`.
+- Ghostty configuration (`ghostty/config.ghostty`): font, a theme that follows the macOS
+  appearance, window and clipboard behaviour, shell integration, and the notification settings
+  that turn an agent's escape sequences into macOS notifications. Reached through a `config-file`
+  block placed at the top of `~/.config/ghostty/config.ghostty`; machine-local overrides go in
+  `~/.config/ghostty/local.ghostty`, which that block includes last. Ghostty 1.2.3 or newer is
+  required for the file name.
+- Yazi configuration (`yazi/`): files open in micro, a `.md` file opens in glow's pager with micro
+  one pick-menu entry away, the preview pane renders Markdown through glow, and a git status mark
+  sits next to every changed file and directory. Reached through `YAZI_CONFIG_HOME`, exported from
+  a block appended to `~/.zshenv`; the repo directory is Yazi's config directory, so there is no
+  machine-local override file. Open a new shell after installing. Yazi 25 or newer is required.
+- hunk configuration (`hunk/config.toml`): a live diff pane for agent work — `hunk diff --watch`
+  renders the whole working tree, untracked files included, and redraws as a coding agent edits.
+  Unlike every other config here it is **copied** to `~/.config/hunk/config.toml`, because hunk
+  has no include directive or config variable and a repeated TOML key is a parse error. Editing
+  the repo file needs a `./install.sh` re-run, and `./install.sh --check` reports when the two have
+  drifted. Anything already at the destination is backed up first.
+- The `micro` terminal editor, for quick edits next to a running coding agent. Nothing sets
+  `$EDITOR` to it yet; that arrives with the zsh configuration.
+- Manual setup guide (`docs/manual-setup.md`), the single place to look after cloning: every step
+  that has to be done by hand, in order, each with a command to verify it and a command to undo it —
+  agent installs and logins, Claude Code through its native installer, provider API keys, Herdr's
+  notification settings, the macOS notification permission and alert style, two known collisions,
+  and Zed's font fallback for Yazi's icons.
+- Guides in `docs/`: agent tooling and installation (why Homebrew for everything, how
+  `auto_updates` casks behave, the Herdr integration lifecycle and its traps); git push defaults
+  (why `push.autoSetupRemote` alone does not create the remote branch, and why the popular
+  `push.default = current` workaround is worse than the problem); Herdr notifications on macOS
+  (why a multiplexer silences the terminal-side setup, which delivery mode to use, how to make a
+  notification stay on screen, and the one Claude Code setting that reaches Ghostty, Herdr and
+  Zed's Terminal Threads); Yazi (the delivery through `YAZI_CONFIG_HOME`, the first-run trap, and
+  why Markdown is matched by name); and hunk (the live pane, reviewing a commit, a branch or a pull
+  request, and why this config is copied).
+- Decision records `docs/decisions/0001` to `0011`, in Michael Nygard's five-section format,
+  recording why the delivery model is what it is: include stubs instead of symlinks; git included
+  from `~/.config/git/config` and never `~/.gitconfig`; Homebrew as the single install channel;
+  auto-updating casks left to manage themselves; agent configuration deliberately unmanaged; shared
+  destinations owned through named delimited blocks; pre-existing apps left unadopted; one agent
+  notification channel across hosts; the Ghostty block inserted first; a config directory exported
+  from `~/.zshenv`; and the hunk config copied with drift reported — each with the alternative that
+  lost — and an index (`docs/decisions/README.md`) that states each decision in a sentence.
 - `.ignore` file that keeps the untracked `spec/` directory readable by search tools, so
   implementation specs stay out of version control without becoming invisible to coding agents.
-- Initial public documentation: the no-symlink delivery model, what is in scope for this repo and
-  what deliberately stays private, and a guide to getting reliable "agent finished" notifications
-  when running coding agents inside Herdr on macOS — with a Claude Code channel
-  (`iterm2_with_bell`) that also reaches terminals that only listen for the bell, such as Zed's
-  Terminal Threads.
-- Manual setup guide (`docs/manual-setup.md`), the single place to look after cloning: every step
-  that has to be done by hand, in order, each with a command to verify it worked and a command to
-  undo it. It covers the steps no installer will ever take over — agent logins, provider API keys,
-  and the macOS notification permission — as well as the ones `install.sh` will absorb when it
-  lands.
 - MIT licence, covering the configuration and documentation in this repository. The third-party
   tools shown here remain under their own licences.
 
-### Changed
-
-- `install.sh` matches its block markers as whole lines, refuses a destination that carries only
-  one of the two markers instead of appending a second block, and keeps a destination's file
-  permissions when it updates a block in place.
-- The Herdr notifications guide and the manual setup now cover making a notification stay on
-  screen (the per-app Persistent alert style in System Settings, which no installer can set), what
-  the number on Ghostty's Dock icon is, and how the same Claude Code setting reaches Zed's
-  Terminal Threads with no Zed-side setup. The manual setup's live test no longer points at the
-  wrong step when nothing appears.
-- `setup.sh` no longer lets Homebrew adopt an app you installed by hand. Such apps are listed and
-  skipped; `./setup.sh --adopt` opts in, names the macOS App Management dialog and the possible
-  password prompt first, and stops before `brew bundle` if the permission is refused, so
-  Homebrew's rollback can no longer delete the app.
-- `setup.sh` keeps going when `brew bundle` reports a failure: the python3 check, the Herdr
-  integrations and the post-install notes still run for what did install, and the script exits
-  non-zero at the end instead of stopping at the failed package.
-- `setup.sh` silences Homebrew's environment hints for its own run, so its output is shorter.
-- `README.md` now opens with a Quick Start — clone, `./setup.sh`, `./install.sh`, and a pointer
-  to the manual steps — and documents `install.sh` with its `--dry-run` and `--check` flags now
-  that it has landed.
-- `docs/manual-setup.md` pruned temporary step 4 (Git push defaults), as it is now automated by
-  `install.sh`, and updated subsequent step numbering and verification commands.
-- `docs/git-push-defaults.md` updated activation instructions to run `./install.sh`.
-- `AGENTS.md` no longer describes git configuration as a shared `~/.gitconfig` owned through
-  BEGIN/END sentinel blocks. That scheme was superseded when the repo moved to including from
-  `~/.config/git/config`, and the invariant, the precedence table and the machine-local override
-  column now match what the installer will actually do.
-- The Herdr notifications guide and the README no longer carry setup commands; they explain the
-  reasoning and link to `docs/manual-setup.md` for the steps, so any command that writes to your
-  home directory now appears in exactly one place in this repository.
-- README now describes the git delivery model as include-only into `~/.config/git/config`: this
-  repo never writes `~/.gitconfig`, so anything you have set there overrides everything it ships.
-  The previous description — both dotfiles repos composing into a single `~/.gitconfig` — was
-  wrong, and is corrected rather than reworded.
-- README installation section and repository layout updated to introduce `setup.sh` and `Brewfile`.
-- README expanded from a placeholder into a project overview: what is in scope, why there are no
-  symlinks, that macOS is the only supported platform, and what installation will look like once
-  the installer lands.
-
-[Unreleased]: https://github.com/theultimate-dev/dotfiles/commits/main
+[Unreleased]: https://github.com/theultimate-dev/dotfiles/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/theultimate-dev/dotfiles/releases/tag/v0.1.0

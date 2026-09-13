@@ -38,7 +38,7 @@ afterwards.
 
 - A separate destination, `~/.config/ghostty/config` — loads before any include as well, so it
   isolates nothing.
-- Regenerating the file wholesale, as the private original does — cannot compose with a second
-  manager.
+- Regenerating the file wholesale — cannot compose with a second manager, or with a line the user
+  typed.
 - Appending like git — puts this repo's include after everyone else's, so it overrides instead of
   defaulting.

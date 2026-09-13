@@ -31,12 +31,17 @@ We copy `hunk/config.toml` to `~/.config/hunk/config.toml` and report the drift 
   the installer owns, and `--check` reports drift nobody caused.
 - There is no machine-local override layer, only a per-project `.hunk/config.toml`.
 - A second manager of this destination would lose silently; none shares it today.
-- The byte-copy fallback named in [0001] now has a worked case, ahead of `~/.tool-versions`.
+- The byte-copy fallback named in [0001](0001-deliver-configs-as-include-stubs-not-symlinks.md)
+  now has a worked case, ahead of `~/.tool-versions`.
 
 ## Alternatives Considered
 
-- A delimited block under [0006] — a repeated key is a TOML parse error, not an override.
-- An include stub under [0001] — hunk has no include directive to write.
-- A config-directory export under [0010] — hunk reads no such variable.
+- A delimited block under [0006](0006-manage-shared-destinations-with-delimited-blocks.md) — a
+  repeated key is a TOML parse error, not an override.
+- An include stub under [0001](0001-deliver-configs-as-include-stubs-not-symlinks.md) — hunk has
+  no include directive to write.
+- A config-directory export under [0010](0010-export-a-config-directory-variable-from-zshenv.md)
+  — hunk reads no such variable.
 - Shipping no config at all — loses the narrow-pane layout and the save-prompt guard.
-- A per-project `.hunk/config.toml` in each repository — multiplies the file instead of placing it once.
+- A per-project `.hunk/config.toml` in each repository — multiplies the file instead of placing it
+  once.

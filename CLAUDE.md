@@ -17,24 +17,20 @@ Claude-specific and is deliberately stated nowhere else.
   past-tense descriptions and scope selection this repo uses.
 - **`writing-adrs`** when a decision about the delivery model will outlive the change that
   introduces it: a rejected alternative worth recording, a new destination mechanism, a precedence
-  trap. Records go in `docs/decisions/` as `NNNN-kebab-title.md`, numbered append-only. Read the
-  existing ones first — `0001`–`0010` already cover the no-symlink model, the git destination, the
-  Homebrew channel, auto-updating casks, why agent config is unmanaged, delimited blocks, app
-  adoption, the notification channel, Ghostty's block position, and the environment-variable
-  redirect, so a new decision is often a *supersede* rather than a fresh number.
+  trap. Records go in `docs/decisions/` as `NNNN-kebab-title.md`, numbered append-only. Read
+  [`docs/decisions/README.md`](docs/decisions/README.md) first — the existing records already cover
+  the delivery model, every destination mechanism in use, and the precedence traps, so a new
+  decision is often a *supersede* rather than a fresh number. Add a row to the index with the
+  record.
 
 ## Working style here
 
 - **Plan before touching the install model.** Anything that changes what lands in `$HOME`, how a
   stub is generated, or precedence between the repo and a stub gets planned and approved first.
   These failures are silent, and they land on a machine the user depends on daily.
-- **Verify against the private original rather than inferring.** When porting from `~/dotfiles`,
-  read the source file *and* its `docs/` rationale. The reasons behind these rules are written
-  down; reconstructing them from the code alone loses the traps — and the port must be sanitized,
-  never a straight copy.
-- **Never `git commit`** unless Igor asks in the current request. This restates the global rule so
-  that it binds at project level too.
-
-## Repository-local files
-
-- `.claude/settings.local.json` is per-machine permission state and stays untracked.
+- **Verify against the tool, not against memory.** When a doc claims how a tool loads its config —
+  which files, in which order, who wins — check it against the tool's own documentation or a test
+  run in a scratch `$HOME` before relying on it. The traps recorded here were found that way, and
+  reconstructing behaviour from the config alone loses them.
+- **Never `git commit`** unless the current request asks for one. This restates the rule in
+  `AGENTS.md` so that it binds Claude Code specifically, whatever a harness default says.

@@ -1,11 +1,54 @@
 # The Ultimate Dev — Dotfiles
 
-My macOS development stack, shared publicly: shell, terminal, git, runtimes, and the tooling that
-holds them together.
+My macOS development stack, shared publicly: terminal, file manager, live diff pane, git defaults,
+and the tooling that holds them together — installed without a single symlink.
+
+<!--
+Hero screenshot goes here once captured. Suggested shot: Ghostty with Herdr open, a coding agent in
+one pane, Yazi with git status marks and a glow-rendered Markdown preview in another, and
+`hunk diff --watch` in a third showing the agent's edits as they land. Add the file as
+docs/assets/hero.png and replace this comment with:
+
+![Ghostty running Herdr, Yazi and hunk side by side](docs/assets/hero.png)
+-->
+
+## What you get
+
+- **A terminal that follows the system appearance** — [Ghostty](https://ghostty.org) with a light
+  and a dark Catppuccin theme, JetBrains Mono, and native macOS notifications when a long command
+  or a coding agent finishes in a pane you are not looking at.
+- **A file manager built for reading code** — [Yazi](https://yazi-rs.github.io) renders Markdown in
+  its preview pane through [glow](https://github.com/charmbracelet/glow), opens text in
+  [micro](https://micro-editor.github.io), and marks the git status of every file and directory.
+- **A live diff pane for agent work** — [hunk](https://hunk.dev) redraws the whole working-tree
+  diff as a coding agent edits it, so review happens while the change lands rather than afterwards.
+  Three git aliases open a commit, a branch or a GitHub pull request in the same viewer.
+- **git push that just works** — a new branch creates and tracks its remote on the first push, and
+  the popular workaround that misreports your branch is explained and rejected.
+- **"Your agent finished" notifications that survive a multiplexer** — one setting that reaches
+  Claude Code in Ghostty, in [Herdr](https://herdr.dev) and in Zed's Terminal Threads.
+- **One command for the tools** — a `Brewfile` covering Ghostty, Zed, Herdr, Yazi, hunk, micro,
+  glow, the GitHub CLI and four coding-agent CLIs, and a `setup.sh` that installs it convergently.
+- **Nothing installed over your own configuration.** Every managed file is reached through the
+  tool's own include mechanism, your existing settings are preserved byte for byte, and your git
+  identity is never touched.
 
 ## Quick Start
 
-Set up your macOS development environment in three steps:
+### Before you start
+
+- **macOS only.** Everything here is verified on macOS 26 with Apple silicon. Older releases are
+  untested; nothing here knowingly needs 26, but nothing has been run there either.
+- **Homebrew is installed for you** if it is missing. Its installer asks for your password and
+  pulls in the Xcode Command Line Tools when they are absent.
+- **git 2.37 or newer** — the push defaults are silently inert on older git. The Command Line
+  Tools ship a recent enough version.
+- **Time and disk.** The `Brewfile` includes `ffmpeg`, `imagemagick` and four GUI apps; a first
+  run takes a while and a few gigabytes.
+- **What gets written.** Four small files in your home directory, each backed up first. The
+  [manual setup](docs/manual-setup.md#before-you-start) lists every one, and how to put it back.
+
+### Three steps
 
 1. **Clone the repository:**
    ```sh
@@ -13,30 +56,42 @@ Set up your macOS development environment in three steps:
    cd dotfiles
    ```
 
-2. **Install tools and packages** (Homebrew, casks, CLI agents, Herdr hooks):
+2. **Install the tools** (Homebrew, casks, agent CLIs, Herdr integrations):
    ```sh
    ./setup.sh
    ```
 
-3. **Place configuration stubs** (atomic, safe, no symlinks):
+3. **Place the configuration** (offline, atomic, no symlinks):
    ```sh
    ./install.sh
    ```
 
-> **Interactive logins & secrets:** Browser logins (Codex, Copilot, Grok, AGY) and provider API keys
-> cannot be scripted. Follow [Manual setup](docs/manual-setup.md) for the remaining one-time steps.
+Then open a new shell. Browser logins for the coding agents, API keys, and one macOS notification
+toggle cannot be scripted; [Manual setup](docs/manual-setup.md) walks through them, in order, each
+with a check and an undo.
 
----
+> **Status:** this repo is being built in the open. Tool installation, git defaults, and the
+> Ghostty, Yazi and hunk configurations are live; the shell configuration and runtime versions
+> follow. [`CHANGELOG.md`](CHANGELOG.md) tracks what has arrived.
 
-**No symlinks.** Not one. See [How configs are delivered](#how-configs-are-delivered).
+## The tools
 
-**Included, never installed over your git config.** The installer owns one named block in
-`~/.config/git/config`; it will never write your `~/.gitconfig`. See
-[why that is structural, not a convention](#included-never-installed-over-your-git-config).
+Every tool here is someone else's work; this repo only installs and configures it. The links go
+to the projects.
 
-> **Status:** this repo is being built in the open. Tool installation, git defaults, the Ghostty
-> configuration and the Yazi file manager are live; the shell config follows.
-> [`CHANGELOG.md`](CHANGELOG.md) tracks what has arrived.
+| Tool | What it is here |
+|---|---|
+| [Ghostty](https://ghostty.org) | The terminal. Managed config; machine-local overrides in `local.ghostty`. |
+| [Herdr](https://herdr.dev) | A terminal multiplexer built for running coding agents in panes. Installed, not configured here. |
+| [Yazi](https://yazi-rs.github.io) | Terminal file manager. Managed config, reached through `YAZI_CONFIG_HOME`. |
+| [hunk](https://hunk.dev) | Read-only diff viewer with a live watch mode. Managed config, copied. |
+| [micro](https://micro-editor.github.io) | Terminal editor for quick edits beside a running agent. |
+| [glow](https://github.com/charmbracelet/glow) | Markdown reader; Yazi's preview and its `.md` opener. |
+| [Zed](https://zed.dev) | GUI editor. Installed; its settings stay yours. |
+| [T3 Code](https://t3.codes) | An alpha GUI control plane for coding agents. Installed; needs your own provider keys. |
+| [Claude Code](https://claude.ai/code) | Anthropic's agent CLI. Installed by its own installer, deliberately not through Homebrew. |
+| [Codex](https://github.com/openai/codex), [Copilot CLI](https://docs.github.com/en/copilot/concepts/agents/about-copilot-cli), [Antigravity CLI](https://antigravity.google/product/antigravity-cli) (`agy`), [Grok Build](https://x.ai/build) | The other agent CLIs, all from the `Brewfile`. |
+| [GitHub CLI](https://cli.github.com) | Feeds a pull request into hunk for review. |
 
 ## Platform
 
@@ -47,27 +102,26 @@ planned — you are welcome to lift whatever is useful, but nothing here has bee
 
 ## What's here, and what isn't
 
-This repo holds only what can go public and is worth sharing. A separate, private repo holds the
-rest: identity, credentials, client-specific and machine-specific configuration. That split is a
-rule, not an accident, and it shapes what you will find here.
+This repo holds configuration and never holds identity. Anything that names a person, a machine or
+an account stays on your machine, untracked, and the docs say where.
 
-| | This repo | Stays private / machine-local |
+| | This repo | Stays on your machine |
 |---|---|---|
-| **git** | push and branch-tracking defaults, aliases, pager and diff setup, a global ignore file | `[user]` identity, signing keys, per-client directory routing |
-| **zsh** | the shell configuration itself | secrets, tokens, anything host-specific |
-| **terminal** | the Ghostty configuration | machine-specific display and font tweaks |
+| **git** | push and branch-tracking defaults, review aliases | `[user]` identity, signing keys, everything else in your `~/.gitconfig` |
+| **terminal** | the Ghostty configuration | machine-specific display and font tweaks, in `local.ghostty` |
 | **files** | the Yazi configuration: openers, Markdown preview, git status marks | nothing — Yazi reads one directory, so there is no local layer |
+| **review** | the hunk configuration | a per-project `.hunk/config.toml`, if a repository needs one |
+| **shell** *(planned)* | the zsh configuration | secrets, tokens, anything host-specific |
 
 The git line is the one worth stating outright: **this repo will never contain a `[user]`
 section.** No name, no email, no signing key. Your identity lives in your own `~/.gitconfig`, which
 is exactly where git already expects to find it.
 
-That split is only practical because of the delivery model below. Two separate dotfiles repos can
-sit on one machine because they write to two different files: this one is included from
-`~/.config/git/config`, the private one keeps `~/.gitconfig`, and git reads the first before the
-second — so public defaults land underneath private configuration, and neither installer touches
-the other's destination. A farm of symlinks structurally cannot do this: there is only one
-`~/.gitconfig`, and whichever repo you install second wins the whole file.
+That is only practical because of the delivery model below. This repo is included from
+`~/.config/git/config`; your own settings stay in `~/.gitconfig`; git reads the first before the
+second — so the defaults here land underneath everything you have ever set, and nothing this repo
+does can override you. A farm of symlinks structurally cannot do this: there is only one
+`~/.gitconfig`, and whatever installs second wins the whole file.
 
 ## How configs are delivered
 
@@ -78,11 +132,16 @@ repo using the target tool's own native include directive:
 
 | Destination | Redirect |
 |---|---|
-| `~/.zshrc` | `source <repo>/zsh/.zshrc` |
 | `~/.config/git/config` — never `~/.gitconfig` | `[include] path = <repo>/git/.gitconfig` |
 | `~/.config/ghostty/config.ghostty` | `config-file = <repo>/ghostty/config.ghostty` |
 | `~/.zshenv` | `export YAZI_CONFIG_HOME=<repo>/yazi` — Yazi has no include directive; the variable names the directory |
 | `~/.config/hunk/config.toml` | byte copy — hunk offers no include directive and no config variable |
+
+Planned, with the mechanism already decided:
+
+| Destination | Redirect |
+|---|---|
+| `~/.zshrc` | `source <repo>/zsh/.zshrc` |
 | `~/.tool-versions` | byte copy — asdf has no include mechanism |
 | `scripts/` | added to `$PATH`; no file installed |
 
@@ -122,9 +181,9 @@ ever put in your own config therefore beats everything this repo ships, automati
 line ordering to get right inside a file we share, because we do not share one — this repo is a
 defaults layer by construction.
 
-The same mechanism is what lets a second, private dotfiles repo coexist. It keeps `~/.gitconfig`,
-this one keeps the XDG file, and neither installer reads or writes the other's destination: no
-sentinel to agree on, no install-order dependency.
+The same mechanism is what lets anything else that manages `~/.gitconfig` — another tool, a work
+setup, or just your own edits — coexist with this repo: it keeps `~/.gitconfig`, this one keeps
+the XDG file, and neither touches the other's destination.
 
 `install.sh` writes this include stub automatically with pre-modification backups and atomic writes.
 See [ADR 0006](docs/decisions/0006-manage-shared-destinations-with-delimited-blocks.md).
@@ -154,8 +213,8 @@ non-destructive flags:
 - `./install.sh --dry-run` — preview planned changes without modifying any files.
 - `./install.sh --check` — verify drift against expected stubs; exits 0 if current, 1 if drifted.
 
-Interactive steps (agent OAuth logins, API keys, and notification permissions) remain manual —
-see [Manual setup](docs/manual-setup.md).
+Interactive steps (agent installs and logins, API keys, and notification permissions) remain
+manual — see [Manual setup](docs/manual-setup.md).
 
 ## Repository layout
 
@@ -173,23 +232,24 @@ see [Manual setup](docs/manual-setup.md).
 | `hunk/` | Managed hunk configuration; copied to its destination rather than included |
 | [`LICENSE`](LICENSE) | MIT — see [Licence and scope](#licence-and-scope) |
 | `docs/` | Deep dives on the pieces whose reasoning is not obvious from the code |
-| [`docs/decisions/`](docs/decisions/) | Architecture decision records — why a choice was made, and what was rejected |
+| [`docs/decisions/`](docs/decisions/README.md) | Architecture decision records, with an index — why a choice was made, and what was rejected |
 
 ## Documentation
 
 - [Manual setup](docs/manual-setup.md) — the only page here with commands to run by hand: every
   step from a fresh clone to a configured machine, in order, each with a way to verify it and a way
   to undo it. Start here. The pages below explain *why* each of those choices was made.
-- [Agent tooling & installation](docs/agent-tooling.md) — why Homebrew is used for all daily tools,
-  how `auto_updates` casks behave, the Herdr integration lifecycle, and how to avoid installer traps
-  when juggling multiple coding agents on macOS.
-- [Decision records](docs/decisions/) — the choices that outlive the change that introduced them,
-  each in five terse sections with the alternative that lost. Start with
+- [Decision records](docs/decisions/README.md) — the choices that outlive the change that
+  introduced them, each in five terse sections with the alternative that lost. The index has one
+  line per decision; start with
   [0001](docs/decisions/0001-deliver-configs-as-include-stubs-not-symlinks.md) for the no-symlink
   model, [0002](docs/decisions/0002-include-git-config-from-xdg-never-gitconfig.md) for why this
   repo never writes your `~/.gitconfig`, and
   [0010](docs/decisions/0010-export-a-config-directory-variable-from-zshenv.md) for the one tool
   reached through an environment variable instead of a stub.
+- [Agent tooling & installation](docs/agent-tooling.md) — why Homebrew is used for all daily tools,
+  how `auto_updates` casks behave, the Herdr integration lifecycle, and how to avoid installer traps
+  when juggling multiple coding agents on macOS.
 - [hunk](docs/hunk.md) — a live diff pane for watching a coding agent edit the working tree as it
   happens, rather than reading the whole changeset afterwards, plus how to review a commit, a
   branch or a GitHub pull request with the same viewer. Also: why a read-only viewer beats a git
@@ -214,14 +274,28 @@ see [Manual setup](docs/manual-setup.md).
   that makes a notification stay on screen, what the badge on Ghostty's Dock icon is, and how the
   same Claude Code setting reaches Zed's Terminal Threads.
 
+## Who is behind this
+
+I am [Igor Wnęk](https://github.com/IgorWnek), a senior agentic product engineer. This is the
+stack I use every day, shared as it is. It lives under
+[The Ultimate Dev](https://github.com/theultimate-dev), where the org profile says what that is
+and lists the other repositories.
+
+## Contributing and support
+
+This is a working setup published as-is, not a product. Read it, lift from it, or install it
+whole; the licence below covers all three. Issues are welcome for anything that misbehaves on a
+fresh machine, and pull requests for fixes are welcome too. A change to what gets installed or how
+a file lands in `$HOME` needs the reasoning written down first, and [`AGENTS.md`](AGENTS.md) is
+the working agreement that says how: it binds human contributors and coding agents alike.
+
 ## Conventions
 
 This repo runs on [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/),
 [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html),
 [Conventional Commits 1.0.0](https://www.conventionalcommits.org/en/v1.0.0/), and
 [Michael Nygard's ADR format](https://cognitect.com/blog/2011/11/15/documenting-architecture-decisions)
-for [`docs/decisions/`](docs/decisions/).
-[`AGENTS.md`](AGENTS.md) is the full contract; it binds human contributors and coding agents alike.
+for [`docs/decisions/`](docs/decisions/README.md).
 
 ## Licence and scope
 

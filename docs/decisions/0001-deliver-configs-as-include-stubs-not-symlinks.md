@@ -6,9 +6,10 @@ Accepted
 
 ## Context
 
-Dotfiles have to reach `$HOME` somehow. The private repository this one is derived from used seven
-`ln -sf` calls. `ln -sf` overwrites a pre-existing real file with no warning and no backup, so a
-hand-written `~/.zshrc` was destroyed by running the installer. A symlink farm also hardcodes the
+Dotfiles have to reach `$HOME` somehow. The obvious mechanism is a symlink farm: one `ln -sf` per
+destination. `ln -sf` overwrites a pre-existing real file with no warning and no backup, so a
+hand-written `~/.zshrc` is destroyed the first time such an installer runs on a machine that already
+has one. A symlink farm also hardcodes the
 repository location: cloned anywhere other than the expected path it produces dangling links, no
 error, and a shell that quietly loses half its configuration. Some backup and sync agents mishandle
 symlinked dotfiles. The repository must stay clone-anywhere, and `git diff` must audit the whole

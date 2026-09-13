@@ -6,13 +6,14 @@ Accepted
 
 ## Context
 
-Eight daily tools need installing on macOS: Ghostty, Zed, T3 Code, Herdr, `terminal-notifier`, and
-the Codex, Copilot, Antigravity and Grok Build agent CLIs. Six document Homebrew as a supported
+Nine daily tools need installing on macOS: Ghostty, Zed, T3 Code, Herdr, `terminal-notifier`, and
+the Codex, Copilot, Antigravity and Grok Build agent CLIs. Seven document Homebrew as a supported
 channel. Two — `antigravity-cli` and `grok-build` — document only a vendor curl installer.
 
-Those installers assume ownership of the machine. They append export blocks to `~/.zshrc`, which is
-a generated redirect stub here, and leave `~/.zshrc.bak.<epoch>` behind. They `ln -sf` binaries into
-`~/.local/bin`, breaching [0001](0001-deliver-configs-as-include-stubs-not-symlinks.md) by proxy.
+Those installers assume ownership of the machine. They append export blocks to `~/.zshrc`,
+outside any block an installer could verify, and leave `~/.zshrc.bak.<epoch>` behind. They
+`ln -sf` binaries into `~/.local/bin`, breaching
+[0001](0001-deliver-configs-as-include-stubs-not-symlinks.md) by proxy.
 OpenAI's prompts interactively to `brew uninstall` an existing cask. Google's exits 0 without
 upgrading when `~/.local/bin/agy` already exists. Zed's is documented for Linux only and, on macOS,
 runs `rm -rf /Applications/Zed.app` before repopulating it.
@@ -24,8 +25,9 @@ endorse.
 
 ## Consequences
 
-- One non-interactive entry point, `brew bundle install`, with no `curl | sh` in `setup.sh`.
-- No installer mutates `~/.zshrc` or creates symlinks in `$HOME`.
+- One entry point, `brew bundle install`. The only `curl | bash` in `setup.sh` is Homebrew's own
+  bootstrap, run once when `brew` is absent; no vendor script is ever piped to a shell.
+- No vendor installer mutates `~/.zshrc` or creates symlinks in `$HOME`.
 - `brew bundle` passes `--adopt` for casks, so it absorbs apps already installed by direct download
   instead of failing with `CaskError`.
 - Two casks are community-packaged. They fetch the vendors' own signed artifacts, pinned by SHA-256

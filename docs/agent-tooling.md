@@ -44,9 +44,10 @@ Vendors increasingly distribute interactive curl scripts that assume ownership o
 machine. In a principled dotfiles environment, those scripts introduce severe failure modes:
 
 - **Rewriting `~/.zshrc`:** Vendor installers append export blocks and shell hooks directly to
-  `~/.zshrc`, dropping timestamped artefacts like `~/.zshrc.bak.<epoch>`. In this repository,
-  `~/.zshrc` is a generated redirect stub that points into version-controlled repository files.
-  Uncoordinated vendor installer mutations corrupt that delivery model.
+  `~/.zshrc`, dropping timestamped artefacts like `~/.zshrc.bak.<epoch>`. This repository delivers
+  configuration through stubs and named blocks that `install.sh --check` can verify; lines a vendor
+  script appends sit outside every block, invisible to that check, and the two end up fighting over
+  one file.
 - **Symlinking into `$HOME`:** Scripts commonly symlink binaries into `~/.local/bin` using `ln -sf`,
   violating **Rule #1** (*No symlinks in `$HOME`*) by proxy.
 - **Aggressive or broken uninstallation logic:**
@@ -68,9 +69,12 @@ Homebrew casks avoid these pathologies by isolating downloads, staging applicati
   provider setup.
 - **No Claude Code in `Brewfile`:** Anthropic distributes [Claude Code](https://claude.ai/code) via
   its native installer into `~/.local/bin/claude`. The Homebrew cask `claude-code` installs an
-  older binary to `/opt/homebrew/bin/claude`. Because `~/.zprofile` places `~/.local/bin` first on
-  `$PATH`, a Homebrew cask would introduce a second binary that is silently shadowed and
-  indefinitely stale. Claude Code is therefore kept out of `Brewfile` entirely.
+  older binary to `/opt/homebrew/bin/claude`. On a machine where `~/.local/bin` precedes Homebrew
+  on `$PATH` — the usual arrangement once the native installer has run — a Homebrew cask would
+  introduce a second binary that is silently shadowed and indefinitely stale. Claude Code is
+  therefore kept out of `Brewfile` entirely, and
+  [step 2 of the manual setup](manual-setup.md#2-install-and-authenticate-the-coding-agents)
+  installs it the vendor's way.
 
 ---
 
@@ -103,11 +107,11 @@ manager**.
 
 By design, `brew upgrade --cask` and `brew outdated` permanently skip `auto_updates` casks. The
 application or binary manages its own updates via Sparkle or background self-updating routines.
-This divergence is visible on a healthy system:
-
-- GitHub Copilot CLI: the Caskroom directory records `0.0.396`, while `copilot --version` reports
-  `1.0.80`.
-- Zed: the Caskroom directory records `0.121.7`, while `Zed.app` reports `1.16.2`.
+This divergence is visible on a healthy system: the Caskroom directory records the version Homebrew
+installed, while `copilot --version` or the Zed *About* box reports whatever the app has since
+updated itself to, often many releases ahead. The Caskroom number is not the truth.
+[ADR 0004](decisions/0004-let-auto-updating-casks-manage-their-own-versions.md) records the gap
+observed when the decision was made.
 
 ### Why we do not use `--greedy`
 
@@ -221,9 +225,9 @@ must be applied manually once Grok has been initialized.
 `setup.sh` detects machine-state collisions and warns without removing user files:
 
 - **`~/.local/bin/agy` shadows Homebrew:** If Google's standalone installer was previously run, it
-  placed a binary in `~/.local/bin/agy`. When `~/.zprofile` places `~/.local/bin` before Homebrew
-  locations on `$PATH`, the standalone binary will shadow `/opt/homebrew/bin/agy`. `setup.sh`
-  warns of this condition but will never delete the file.
+  placed a binary in `~/.local/bin/agy`. On a `$PATH` where `~/.local/bin` precedes Homebrew's
+  `bin`, the standalone binary shadows `/opt/homebrew/bin/agy`. `setup.sh` warns of this
+  condition but will never delete the file.
 - **Existing application bundles:** an app already in `/Applications` that Homebrew did not
   install is reported and skipped, never adopted on its own. The prompts, the `sudo`, and the
   rollback that deletes the app are covered in

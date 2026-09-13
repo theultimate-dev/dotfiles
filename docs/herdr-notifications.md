@@ -174,8 +174,9 @@ only trace that survives, which is why it looks as if the badge is all you get.
 
 The bell stays on: it is what Zed's Terminal Threads key their popup on. If the badge is noise once
 alerts are Persistent, `bell-features = no-attention` in your Ghostty configuration keeps the
-notification and drops the bounce and the badge (`no-title` also drops the 🔔 in the tab title).
-The repo's [`ghostty/config.ghostty`](../ghostty/config.ghostty) carries that line commented out.
+notification and drops the bounce and the badge, and `no-title` also drops the 🔔 in the tab title.
+The repo's [`ghostty/config.ghostty`](../ghostty/config.ghostty) carries
+`bell-features = no-attention,no-title` commented out, ready to switch on.
 
 ## Sounds
 

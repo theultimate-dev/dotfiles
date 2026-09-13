@@ -12,8 +12,8 @@ own persistent popup when an unfocused thread rings the terminal bell. Bare Ghos
 a macOS notification and answers the bell with a Dock bounce. Herdr owns the PTY, swallows the
 agent's OSC 9, detects pane state itself, and posts through `terminal-notifier`. macOS decides per
 sender app whether a notification is Temporary (gone in seconds) or Persistent, and stores that
-choice in a private preference file with no supported write path. In the private original, a
-synchronous notifier in a Stop hook once blocked Claude Code for the full 600-second hook timeout.
+choice in a private preference file with no supported write path. An earlier setup that ran a
+synchronous notifier from a Stop hook once blocked Claude Code for the full 600-second hook timeout.
 
 ## Decision
 

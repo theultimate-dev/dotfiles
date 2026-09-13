@@ -7,8 +7,8 @@ Accepted
 ## Context
 
 Configuration delivery requires injecting stubs into user configuration files in `$HOME` (such as
-`~/.config/git/config`). This public repository is frequently installed on machines with existing
-hand-written configuration or alongside a private dotfiles repository.
+`~/.config/git/config`). This repository is installed on machines with existing hand-written
+configuration, and often with another tool already maintaining lines in the same files.
 
 Overwriting destination files wholesale clobbers user settings. Symlinks destroy pre-existing files
 and prevent multiple managers from contributing settings to the same tool. Single-sentinel schemes
@@ -51,8 +51,8 @@ The installer contract enforces:
 
 ## Alternatives Considered
 
-- Single sentinel line ("everything above this line is managed") — two dotfiles installers each
-  owning everything above a separator erase each other's block on alternating runs.
-- Wholesale file generation — destroys all pre-existing user settings and private configurations.
+- Single sentinel line ("everything above this line is managed") — two managers each owning
+  everything above a separator erase each other's block on alternating runs.
+- Wholesale file generation — destroys all pre-existing user settings.
 - Symlinks via `ln -sf` — clobbers real files silently, breaks multiple-repo composition, and
   hardcodes clone paths into `$HOME`.

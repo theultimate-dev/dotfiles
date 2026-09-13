@@ -36,8 +36,8 @@ Every edit takes effect the next time Yazi starts, and `git diff` audits all of 
 
 Why `~/.zshenv`: zsh reads it for every shell, login or not, interactive or not. A Yazi started
 from a Ghostty tab, from Zed's terminal, or inside a Herdr pane sees the variable. `~/.zshrc` only
-reaches interactive shells, and on the maintainer's machine it belongs to a second dotfiles
-installer anyway. The block is appended rather than prepended because in a shell the last export
+reaches interactive shells, and it is the file every shell framework and vendor installer wants to
+edit anyway. The block is appended rather than prepended because in a shell the last export
 wins, which keeps this repo a defaults layer: an export you type below the block survives every
 re-run and overrides it.
 
