@@ -21,6 +21,7 @@ the cost that was accepted.
 | [0009](0009-insert-the-ghostty-block-first.md) | Insert the Ghostty block first in the destination file — Ghostty applies includes last, later wins | Accepted |
 | [0010](0010-export-a-config-directory-variable-from-zshenv.md) | Export a config-directory variable from `~/.zshenv` — Yazi reads the repo directory itself | Accepted |
 | [0011](0011-copy-the-hunk-config-and-report-drift.md) | Copy the hunk config and report drift — no include mechanism, and TOML forbids a shared block | Accepted |
+| [0012](0012-replace-glow-with-leaf-for-markdown.md) | Replace Glow with Homebrew-installed Leaf for Markdown reading and previews, using the dark Ocean theme | Accepted |
 
 Three of these are the ones to know before editing anything: 0001 for the delivery model, 0002 for
 why git is the exception that avoids sharing a file at all, and 0009 for the precedence trap where

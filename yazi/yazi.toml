@@ -11,7 +11,7 @@
 # YAZI_CONFIG_HOME below the block in ~/.zshenv.
 # See docs/yazi.md and docs/decisions/0010-export-a-config-directory-variable-from-zshenv.md.
 #
-# Tested with Yazi 26.9.1 and glow 3.0.0 from Homebrew. The `%s` opener
+# Tested with Yazi 26.9.1 and Leaf 1.28.2 from Homebrew. The `%s` opener
 # placeholders and the `[mgr]` section name need Yazi 25.x or newer.
 
 # ── Openers ───────────────────────────────────────
@@ -23,9 +23,9 @@
 micro = [
 	{ run = 'micro %s', desc = "Edit (micro)", block = true, for = "unix" },
 ]
-glow = [
-	# glow renders one document; %s1 is the first selected file.
-	{ run = 'glow -p %s1', desc = "Read (glow)", block = true, for = "unix" },
+leaf = [
+	# Leaf reads one document; %s1 is the first selected file. Ctrl+E opens micro.
+	{ run = 'leaf --theme ocean --editor micro -- %s1', desc = "Read (Leaf)", block = true, for = "unix" },
 ]
 
 # ── Open rules ────────────────────────────────────
@@ -36,19 +36,19 @@ glow = [
 # markdown mime type never fires. Match the file name instead.
 [open]
 prepend_rules = [
-	{ url = "*.md", use = [ "glow", "micro", "edit", "reveal" ] },
+	{ url = "*.md", use = [ "leaf", "micro", "edit", "reveal" ] },
 	{ mime = "text/*", use = [ "micro", "edit", "reveal" ] },
 	{ mime = "inode/empty", use = [ "micro", "edit", "reveal" ] },
 	{ mime = "application/{json,ndjson,javascript,wine-extension-ini}", use = [ "micro", "edit", "reveal" ] },
 ]
 
 # ── Preview pane ──────────────────────────────────
-# Markdown rendered by glow through the official piper plugin (package.toml).
-# glow 2.x drops colour when stdout is not a tty; CLICOLOR_FORCE=1 keeps it.
-# $w is the pane width; $t is the terminal theme reported by Yazi.
+# Leaf's noninteractive renderer through the official piper plugin (package.toml).
+# Explicit ANSI keeps colour through the pipe; $w supplies the pane width.
+# Ocean stays dark regardless of terminal appearance. Leaf clamps width to 20.
 [[plugin.prepend_previewers]]
 url = "*.md"
-run = 'piper -- CLICOLOR_FORCE=1 glow -w=$w -s=$t "$1"'
+run = 'piper -- leaf --theme ocean --inline "ansi:$w" -- "$1"'
 
 # ── Git status marks ──────────────────────────────
 # The official git plugin (package.toml, set up in init.lua) marks files and

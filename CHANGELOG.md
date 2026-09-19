@@ -20,6 +20,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   replacements are minor releases, even when a routine setup or dependency installation is
   required. Incompatible changes to the model remain major releases, before and after 1.0.
 
+- Replaced Glow with Leaf for Yazi's Markdown reader and preview pane, using the dark Ocean
+  theme in both. Leaf adds terminal Mermaid diagrams, math rendering, a table of contents, and
+  `Ctrl+E` to edit in micro. **Migration required:** install Homebrew's `leaf-markdown-viewer`
+  formula before restarting Yazi; existing config stubs need no reinstall. See
+  [the migration steps](docs/manual-setup.md#switch-an-existing-installation-from-glow-to-leaf).
+  Glow is no longer in the Brewfile, but an existing installation is left available for comparison.
+
 ## [0.1.0] - 2026-09-13
 
 The first release: the installer, the tool list, and four managed configurations, with the

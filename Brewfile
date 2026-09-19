@@ -6,7 +6,7 @@ brew "gh"                 # GitHub CLI; `gh pr diff N | hunk patch -` is the PR 
 brew "figlet"             # banner text for screenshots and demos: figlet -f slant "The Ultimate Dev"
 
 brew "yazi"               # terminal file manager; reached through YAZI_CONFIG_HOME, see docs/yazi.md
-brew "glow"               # markdown reader; Yazi's *.md opener and its preview pane
+brew "leaf-markdown-viewer" # leaf executable; Yazi's Markdown reader and preview (not the unrelated leaf formula)
 brew "fd"                 # Yazi: file-name search
 brew "ripgrep"            # Yazi: content search
 brew "fzf"                # Yazi: fuzzy jump

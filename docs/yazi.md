@@ -1,20 +1,19 @@
-# Yazi: a file manager that opens in micro, reads in glow, and shows git status
+# Yazi: a file manager that opens in micro, reads in Leaf, and shows git status
 
 How [Yazi](https://yazi-rs.github.io) is configured here, how the configuration reaches it without
-a symlink or a copy, and the three traps met on the way.
+a symlink or a copy, and the traps met on the way.
 
-Verified against **Yazi 26.9.1**, **glow 3.0.0**, **micro 2.0.15** and **Ghostty 1.3.1** on
+Verified against **Yazi 26.9.1**, **Leaf 1.28.2**, **micro 2.0.15** and **Ghostty 1.3.1** on
 macOS 26.
 
 ## What you get
 
 Inside a repository, `yazi` shows:
 
-- a preview pane that renders Markdown through glow while you hover, before anything is opened;
-- **Enter** on a `.md` file opens it full-screen in glow's pager; **Shift+Enter** (or `O`) opens
-  a pick menu whose second entry is micro, for when reading turns into editing. glow's standard
-  styles keep the `##` markers on second-level and deeper headings on purpose, coloured and
-  bold; only the top heading is drawn as a block. That is the rendered view, not the source;
+- a preview pane that renders Markdown through Leaf while you hover, including supported Mermaid
+  diagrams and math, using the dark Ocean theme;
+- **Enter** on a `.md` file opens Leaf full-screen in Ocean; **Shift+Enter** (or `O`) opens a
+  pick menu whose second entry is micro. Inside Leaf, `Ctrl+E` opens micro and `q` returns to Yazi;
 - **Enter** on any other text file opens micro;
 - a git status mark next to every file, and a rolled-up mark on every directory that contains
   changed files: `M` modified, `A` added, `?` untracked, `D` deleted, and so on.
@@ -59,7 +58,7 @@ for and which ones it found.
 The first `yazi` after `./setup.sh` and `./install.sh` will misbehave if you type it into the
 shell that ran them, and it misbehaves in two ways that look unrelated:
 
-- **Enter opens `vi`, not glow.** That shell started before the `~/.zshenv` block existed, so it
+- **Enter opens `vi`, not Leaf.** That shell started before the `~/.zshenv` block existed, so it
   has no `YAZI_CONFIG_HOME`. Yazi looks in `~/.config/yazi`, finds nothing, and runs with its
   defaults, where a text file goes to `$EDITOR` and `$EDITOR` falls back to `vi`.
 - **Inside this repo, `yazi` changes into the `yazi/` directory instead of starting.** zsh's
@@ -73,18 +72,18 @@ Both have the same cure: open a new shell. A new Ghostty tab, a new Herdr pane o
 terminal all start a fresh zsh that reads `~/.zshenv` and has an empty hash. To repair the shell
 you are in instead, run `source ~/.zshenv; rehash`. Neither Ghostty nor Herdr needs restarting.
 
-## Openers: micro for text, glow for Markdown
+## Openers: micro for text, Leaf for Markdown
 
 Yazi decides what "open" means with `[open]` rules, matched first to last, each naming a list of
 `[opener]` entries. **Enter** runs the first opener in the matched list; **Shift+Enter** and `O`
-show all of them in a menu. That single feature is what makes "read in glow *and* edit in micro"
+show all of them in a menu. That single feature is what makes "read in Leaf *and* edit in micro"
 a configuration rather than a compromise.
 
 `yazi/yazi.toml` prepends four rules to the defaults:
 
 | File | Enter | Menu, in order |
 |---|---|---|
-| `*.md` | glow, pager mode | glow, micro, `$EDITOR`, Reveal in Finder |
+| `*.md` | Leaf, full-screen | Leaf, micro, `$EDITOR`, Reveal in Finder |
 | any `text/*` mime | micro | micro, `$EDITOR`, Reveal |
 | empty file | micro | micro, `$EDITOR`, Reveal |
 | JSON, JavaScript, `.ini` | micro | micro, `$EDITOR`, Reveal |
@@ -100,31 +99,70 @@ and on macOS that command reports a `.md` file as `text/plain`. A rule on `text/
 correct, looks right, and never fires. The Markdown rule therefore matches `url = "*.md"`, and it
 is listed before the `text/*` rule because the first match wins.
 
-glow renders one document, so its opener passes `%s1`, the first selected file, where micro's
-passes `%s`, all of them.
+Leaf reads one document, so its opener passes `%s1`, the first selected file, where micro's
+passes `%s`, all of them. `--` ends Leaf's option parsing, protecting dash-prefixed filenames.
+`--editor micro` makes `Ctrl+E` use the same editor as Yazi's menu.
 
 ## The preview pane
 
 Yazi's built-in previewer shows Markdown as syntax-highlighted source. The official
 [piper](https://github.com/yazi-rs/plugins/tree/main/piper.yazi) plugin pipes any shell command
-into the pane instead, and the config uses it to run glow:
+into the pane instead, and the config uses Leaf's noninteractive renderer:
 
 ```toml
 [[plugin.prepend_previewers]]
 url = "*.md"
-run = 'piper -- CLICOLOR_FORCE=1 glow -w=$w -s=$t "$1"'
+run = 'piper -- leaf --theme ocean --inline "ansi:$w" -- "$1"'
 ```
 
-Three details in that line, each learned the hard way by someone:
+The interactive reader needs the terminal; starting it inside a preview pipe is the wrong mode.
+`--inline` writes the rendered document to stdout without entering the TUI, and `ansi` forces
+colour even though stdout is a pipe. No `CLICOLOR_FORCE` environment variable is needed.
+`$w` supplies the pane width instead of Leaf's default 80-column non-terminal width. Leaf clamps
+inline widths below 20 columns to 20, so a narrower pane clips the result. Large diagrams can
+wrap across lines and lose their layout; open the reader in a wider terminal to inspect them.
+`"$1"` preserves the filename as one argument, and `--` ends option parsing.
 
-- `CLICOLOR_FORCE=1`: glow 2.0 and later drop colour when stdout is not a terminal, and inside
-  piper it never is. Without the variable the preview is plain text.
-- `$w` is the pane width, so glow wraps to fit rather than to its default 80 columns.
-- `$t` is the terminal theme Yazi detected, `dark` or `light`, so glow's style follows the macOS
-  appearance the same way the Ghostty theme does. When a terminal does not report its background
-  the value is `auto` and glow falls back to its own detection.
+Both the reader and preview pass `--theme ocean` explicitly: Markdown stays dark even when the
+terminal reports a light background. Ocean is a built-in dark palette; no custom theme or managed
+Leaf config is needed. CLI flags override personal Leaf theme settings for these Yazi commands.
+Standalone Leaf also defaults to Ocean, but a personal config or `LEAF_THEME` can override that.
+This choice does not change Ghostty's own appearance settings.
 
-Scroll the preview with `J` and `K`.
+Scroll the preview with `J` and `K`. Leaf's TOC, search, and editor integration belong to the
+full-screen reader; the pane displays rendered text only.
+
+## Leaf and Glow
+
+[ADR 0012](decisions/0012-replace-glow-with-leaf-for-markdown.md) records why Leaf replaces Glow.
+Both render Markdown tables and highlighted code; table support alone is not the distinction.
+The added value is reading diagrams and math alongside prose, then navigating a long document or
+opening its editor without leaving the reader.
+
+| Capability | Leaf | Glow |
+|---|---|---|
+| Tables and highlighted code | Rendered tables and code frames | Rendered tables and highlighted code |
+| Mermaid | Terminal text diagrams for supported syntax | Fenced source in the standard renderer |
+| Math | Terminal formula rendering | No dedicated formula renderer |
+| Reading workflow | TOC, heading jumps, search, watch mode, `Ctrl+E` editor | Markdown discovery, TUI, external pager |
+| Input | Local files, picker, stdin | Local files, stdin, HTTP URLs and GitHub/GitLab README shortcuts |
+| Appearance here | Ocean forced in both Yazi commands | Previously followed the terminal's light/dark appearance |
+
+Leaf's diagrams are text, not browser-rendered SVGs. Unsupported Mermaid syntax and complex
+layouts need checking against the original document; do not assume complete Mermaid or LaTeX
+compatibility. A prettier table is a visual preference, not a capability missing from Glow.
+Glow's URL shortcuts and pager workflow remain useful outside Yazi.
+
+Sources: [Leaf's usage and features](https://github.com/RivoLink/leaf#usage),
+[its Mermaid renderer](https://github.com/RivoLink/leaf/blob/main/src/markdown/mermaid.rs),
+[Glow's CLI and pager](https://github.com/charmbracelet/glow#the-cli), and
+[Glamour's table renderer](https://github.com/charmbracelet/glamour/blob/master/ansi/table.go).
+
+Homebrew's [leaf-markdown-viewer](https://formulae.brew.sh/formula/leaf-markdown-viewer) formula
+installs the `leaf` executable. The unrelated `leaf` and `leaf-proxy` formulae conflict with it.
+Updates stay with Homebrew; do not run Leaf's self-updater on a Homebrew-managed binary. Removing
+Glow from the Brewfile does not uninstall an existing copy. Installation, verification, optional
+cleanup, and rollback live in [Manual setup](manual-setup.md#switch-an-existing-installation-from-glow-to-leaf).
 
 ## Git status marks
 
@@ -177,8 +215,9 @@ variable, the same command writes `~/.config/yazi/package.toml` instead, and Yaz
 - **`$EDITOR`**, the **`y` cd-on-quit wrapper**, and the **zoxide** and **fzf** shell hooks all
   belong to the zsh configuration and arrive with that port. Yazi's own `z` jump already works:
   Yazi adds every directory it visits to zoxide's database itself.
-- **glow's own config** (`glow.yml` under `~/Library/Preferences/glow/`) stays unmanaged. Every
-  setting this repo needs is passed on the command line, which overrides the file.
+- **Leaf's own config** (`~/.config/leaf/config.toml`, or under `$XDG_CONFIG_HOME`) stays
+  unmanaged. Yazi passes the required theme, editor, and preview mode on the command line.
+  Personal Leaf settings can still control other behavior, such as watch mode and history.
 - **`keymap.toml` and `theme.toml`**: the default keys already cover open, open-with-menu and
   preview scrolling, and the default theme is fine. Either file can be added to `yazi/` later
   with no installer change, which is the point of the variable.

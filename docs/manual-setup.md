@@ -82,7 +82,7 @@ step 1 there is simply nothing there to configure.)
 ## 1. Install the tools and place configs
 
 **What you get.** Homebrew plus every tool the rest of this guide configures — Ghostty, Zed, Herdr,
-T3 Code, `terminal-notifier`, Yazi with glow and the tools its previews run through, and the
+T3 Code, `terminal-notifier`, Yazi with Leaf and the tools its previews run through, and the
 coding agent CLIs — installed and on `$PATH`, with Herdr's session-identity integration registered
 for each agent whose config directory already exists, Yazi's two plugins restored from the
 tracked lockfile, and the git and Ghostty include stubs plus the `YAZI_CONFIG_HOME` export in
@@ -139,7 +139,7 @@ Flavors:
 
 The last two run in a fresh `zsh` on purpose, so they see the `~/.zshenv` the installer just
 wrote. Then, in any git repository with an uncommitted change, `yazi` shows a mark next to the
-changed file, hovering a `.md` file renders it in the preview pane, and Enter on it opens glow.
+changed file, hovering a `.md` file renders it in the preview pane, and Enter on it opens Leaf.
 
 An app `setup.sh` skipped shows up in the first check as missing until you adopt it. That is the
 expected state, not drift. After `--adopt`, `brew list --cask zed` names it.
@@ -150,7 +150,7 @@ entry instead, and remove Homebrew itself only with its own uninstaller:
 ```sh
 brew bundle list --all --file=<repo>/Brewfile   # everything setup.sh installed
 brew uninstall --cask ghostty                   # ...one entry at a time
-brew uninstall yazi glow                        # ...Yazi and its reader likewise
+brew uninstall yazi leaf-markdown-viewer         # ...Yazi and its reader likewise
 herdr integration uninstall claude              # ...and any integration it registered
 cp -p ~/.dotfiles-backup/zshenv ~/.zshenv       # the ~/.zshenv from before the export block
 ```
@@ -166,6 +166,51 @@ took over. To have it outside Homebrew again, reinstall it from the vendor's dow
 scripts rewrite `~/.zshrc` and symlink into `$HOME` — see
 [Agent tooling and installation](agent-tooling.md#why-vendor-curl-installers-were-rejected).
 Configuration placement is kept strictly offline in `install.sh` to adhere to the two-script split.
+
+### Switch an existing installation from Glow to Leaf
+
+**Do this.** Install the Markdown viewer formula, then quit and restart Yazi:
+
+```sh
+brew install leaf-markdown-viewer
+```
+
+The executable is `leaf`; the formula named `leaf` is an unrelated program. Existing installations
+already pointing `YAZI_CONFIG_HOME` at this repo need no `install.sh` re-run. Leave Glow installed
+until you finish comparing the readers. Full setup also installs Leaf through the Brewfile.
+
+**Verify.**
+
+```sh
+leaf --version
+leaf --theme ocean --inline ansi:80 -- README.md
+./install.sh --check
+```
+
+In a fresh Yazi session, hover a Markdown file with a table and a Mermaid flowchart. Check the
+preview, scroll it with `J` and `K`, and resize the terminal. Enter opens Leaf in Ocean; `q` returns
+to Yazi. `Ctrl+E` inside Leaf opens micro, and `O` in Yazi still offers micro as the second entry.
+Compare the same file in Glow before removing it. See [rendering limits](yazi.md#leaf-and-glow)
+for why a narrow preview or an unsupported diagram can look different from a browser.
+
+**Optional cleanup after verification.**
+
+```sh
+brew uninstall glow
+```
+
+This does not remove personal Glow settings. Do not use `brew bundle cleanup` for this migration:
+it can remove unrelated tools absent from this repository's Brewfile.
+
+**Undo.** Restore the previous `Brewfile` and `yazi/yazi.toml` together from your pre-migration
+revision, preserving any unrelated edits, then restart Yazi. If you removed Glow, reinstall it:
+
+```sh
+brew install glow
+```
+
+Leaf can remain installed while you verify the rollback. To remove it afterwards, use the
+per-entry uninstall procedure above with the `leaf-markdown-viewer` formula.
 
 ---
 

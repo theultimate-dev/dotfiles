@@ -5,7 +5,7 @@ and the tooling that holds them together — installed without a single symlink.
 
 <!--
 Hero screenshot goes here once captured. Suggested shot: Ghostty with Herdr open, a coding agent in
-one pane, Yazi with git status marks and a glow-rendered Markdown preview in another, and
+one pane, Yazi with git status marks and a Leaf-rendered Markdown preview in another, and
 `hunk diff --watch` in a third showing the agent's edits as they land. Add the file as
 docs/assets/hero.png and replace this comment with:
 
@@ -18,7 +18,8 @@ docs/assets/hero.png and replace this comment with:
   and a dark Catppuccin theme, JetBrains Mono, and native macOS notifications when a long command
   or a coding agent finishes in a pane you are not looking at.
 - **A file manager built for reading code** — [Yazi](https://yazi-rs.github.io) renders Markdown in
-  its preview pane through [glow](https://github.com/charmbracelet/glow), opens text in
+  its preview pane through [Leaf](https://github.com/RivoLink/leaf), including Mermaid diagrams,
+  uses a dark Ocean theme for Markdown reading, opens text in
   [micro](https://micro-editor.github.io), and marks the git status of every file and directory.
 - **A live diff pane for agent work** — [hunk](https://hunk.dev) redraws the whole working-tree
   diff as a coding agent edits it, so review happens while the change lands rather than afterwards.
@@ -28,7 +29,7 @@ docs/assets/hero.png and replace this comment with:
 - **"Your agent finished" notifications that survive a multiplexer** — one setting that reaches
   Claude Code in Ghostty, in [Herdr](https://herdr.dev) and in Zed's Terminal Threads.
 - **One command for the tools** — a `Brewfile` covering Ghostty, Zed, Herdr, Yazi, hunk, micro,
-  glow, the GitHub CLI and four coding-agent CLIs, and a `setup.sh` that installs it convergently.
+  Leaf, the GitHub CLI and four coding-agent CLIs, and a `setup.sh` that installs it convergently.
 - **Nothing installed over your own configuration.** Every managed file is reached through the
   tool's own include mechanism, your existing settings are preserved byte for byte, and your git
   identity is never touched.
@@ -86,7 +87,7 @@ to the projects.
 | [Yazi](https://yazi-rs.github.io) | Terminal file manager. Managed config, reached through `YAZI_CONFIG_HOME`. |
 | [hunk](https://hunk.dev) | Read-only diff viewer with a live watch mode. Managed config, copied. |
 | [micro](https://micro-editor.github.io) | Terminal editor for quick edits beside a running agent. |
-| [glow](https://github.com/charmbracelet/glow) | Markdown reader; Yazi's preview and its `.md` opener. |
+| [Leaf](https://github.com/RivoLink/leaf) | Markdown reader; Yazi's preview and its `.md` opener. |
 | [Zed](https://zed.dev) | GUI editor. Installed; its settings stay yours. |
 | [T3 Code](https://t3.codes) | An alpha GUI control plane for coding agents. Installed; needs your own provider keys. |
 | [Claude Code](https://claude.ai/code) | Anthropic's agent CLI. Installed by its own installer, deliberately not through Homebrew. |
@@ -200,7 +201,7 @@ Installation follows the two-script split:
 The split exists so that config placement never depends on the network and stays debuggable on a
 half-broken machine.
 
-`setup.sh` installs the daily tools via Homebrew (Ghostty, micro, hunk, Yazi and glow with the
+`setup.sh` installs the daily tools via Homebrew (Ghostty, micro, hunk, Yazi and Leaf with the
 tools Yazi previews through, Zed, T3 Code, Herdr, and coding agent CLIs), restores Yazi's plugins
 from the tracked lockfile, and configures Herdr agent integrations. Re-running it is safe and
 convergent. An app installed by hand before is left alone and reported; `./setup.sh --adopt`
@@ -257,7 +258,7 @@ manual — see [Manual setup](docs/manual-setup.md).
   TOML rule that makes a shared block impossible, and the git alias trap that makes a relative
   pathspec vanish.
 - [Yazi](docs/yazi.md) — a terminal file manager that opens files in micro, reads Markdown in
-  glow with micro one menu away, renders Markdown in its preview pane, and marks git status next
+  Leaf with micro one menu away, renders Markdown in its preview pane, and marks git status next
   to every file. Also: why its config is delivered through `YAZI_CONFIG_HOME` in `~/.zshenv`
   rather than a stub, why that means no machine-local override, why the Markdown rule matches the
   file name and not the mime type, and which of your two terminals needs a Nerd Font for the
