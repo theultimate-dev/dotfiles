@@ -205,13 +205,25 @@ The parts that are easy to get wrong:
 
 ### What the version numbers mean here
 
+The compatibility contract is the installation and configuration model: how tools are installed,
+how managed configuration reaches them, who owns each destination, and where local overrides win.
+The tool selection and daily workflows evolve within that model. These rules apply both before
+and after 1.0; they are not a temporary exception for 0.x releases.
+
 | Bump | Meaning in a dotfiles repo | Examples |
 |---|---|---|
-| **MAJOR** | The user must act — re-run the installer, or move something | Stub format changed; a destination path moved; a managed config removed |
-| **MINOR** | New capability, no action required | A newly managed config, a new script on `$PATH`, a new tool in `Brewfile` |
-| **PATCH** | Fix or refinement, no action required | Corrected alias, documentation fix, installer edge case |
+| **MAJOR** | Incompatible change to the installation or configuration model | Replacing Homebrew as the installation channel; changing config ownership or override precedence; requiring manual relocation of existing configuration |
+| **MINOR** | Added or replaced tools, managed configs, or workflow capabilities within the existing model | Replacing Glow with Leaf; a newly managed config; a new script on `$PATH`; a new tool in `Brewfile` |
+| **PATCH** | Fix or refinement of existing behavior, configuration, or documentation | Corrected alias; documentation fix; installer edge case |
 
-Anything in the MAJOR row is also a breaking change in its commit — see below.
+Running `setup.sh` or `install.sh`, installing a new dependency, and restarting a tool are routine
+upgrade steps. Requiring one of those steps does not by itself make a change major. Document
+required upgrade steps in the changelog regardless of the version bump, with procedures in
+`docs/manual-setup.md`.
+
+Reserve `!` and `BREAKING CHANGE:` for changes in the MAJOR row. Tool replacements within the
+existing model use `feat` without a breaking-change marker. Release skills and automation must
+classify compatibility using this project policy before deriving the bump from commit messages.
 
 ---
 

@@ -14,6 +14,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   leaked identity — and where to report one privately through GitHub's vulnerability reporting
   form, so no contact address lives in the repository.
 
+### Changed
+
+- Clarified versioning around the installation and configuration model: tool additions and
+  replacements are minor releases, even when a routine setup or dependency installation is
+  required. Incompatible changes to the model remain major releases, before and after 1.0.
+
 ## [0.1.0] - 2026-09-13
 
 The first release: the installer, the tool list, and four managed configurations, with the
