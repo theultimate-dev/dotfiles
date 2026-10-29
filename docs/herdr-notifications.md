@@ -47,8 +47,9 @@ is on `PATH`, and falls back to `osascript` if it is not. On Linux it uses `noti
 ## Recommended setup: local agents on macOS
 
 Herdr reads `~/.config/herdr/config.toml`, and four values in it are worth setting deliberately.
-[Step 3 of the manual setup guide](manual-setup.md#3-herdr-notifications) carries the file contents,
-the reload command and the rollback; this section is why each value is what it is.
+They live in this repo's [`herdr/config.toml`](../herdr/config.toml);
+[step 3 of the manual setup guide](manual-setup.md#3-configure-herdr) applies that file, with the
+reload command and the rollback. This section is why each value is what it is.
 
 **`delivery = "system"`, under `[ui.toast]`.** The one that matters. Herdr owns the PTY, so the
 terminal-side path is already broken before you configure anything, and `"system"` is what replaces
@@ -196,7 +197,7 @@ going silent everywhere.
 
 Herdr ships integrations that teach each agent to report its session to the multiplexer. `setup.sh`
 registers them for every agent whose configuration directory already exists;
-[step 3 of the manual setup guide](manual-setup.md#3-herdr-notifications) covers installing one for
+[step 3 of the manual setup guide](manual-setup.md#3-configure-herdr) covers installing one for
 an agent that arrived afterwards.
 
 For Claude Code the integration drops `~/.claude/hooks/herdr-agent-state.sh` and registers it as a

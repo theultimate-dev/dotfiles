@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Herdr configuration in `herdr/`, kept here and applied by hand or by a coding agent — never by a
+  script, because Herdr's config file is also written by Herdr itself and by its plugins (see
+  [ADR 0013](docs/decisions/0013-apply-the-herdr-config-by-hand.md)). It carries the notification
+  setup, `prefix+g` to the pane behind a notification, and
+  [herdr-radar](https://github.com/hhdebb/herdr-radar): a sidebar that shows which agents are
+  working and which are waiting on you, grouped by project, with `prefix+a` to flip its order and
+  `prefix+comma` for its settings. `setup.sh` installs the plugin at the release pinned in
+  `herdr/plugins.txt`, and Renovate opens a pull request for each new one. The plugin needs Node 18
+  or newer, which this repository does not install yet. **Upgrade steps:** run `./setup.sh`, then
+  [step 3 of the manual setup](docs/manual-setup.md#3-configure-herdr), which copies the files onto
+  a Mac with no Herdr config yet, says what to merge into one that has, and writes the plugin's
+  sidebar into Herdr's config. Step 3 also has a prompt to hand the whole step to an agent.
+
+### Changed
+
+- Step 3 of the manual setup, Herdr notifications, is now "Configure Herdr". It applies the tracked
+  `herdr/config.toml` instead of appending four tables to your Herdr config by hand. A config set
+  up from the old step already holds those tables; merge the rest of the file into it as step 3
+  describes.
+
 ### Removed
 
 - T3 Code. It is no longer in the `Brewfile`, `setup.sh` neither installs it nor reports a copy

@@ -15,12 +15,14 @@ expands it for you.
 macOS only. Git push defaults additionally need **git 2.37 or newer** — check with `git --version`,
 because on older git the settings `install.sh` activates are silently inert.
 
-**What gets written.** Five files outside this repo by hand, and nothing else. No step creates a
-symlink, and no step overwrites a file wholesale:
+**What gets written.** Six files outside this repo by hand, and nothing else. No step creates a
+symlink, and no step overwrites a file holding settings of yours — step 3 replaces Herdr's config
+only while it holds nothing but the `onboarding = false` Herdr's first run writes:
 
 | Path | Step | Action | Present today? |
 |---|---|---|---|
-| `~/.config/herdr/config.toml` | 3 | created, or edited | absent until Herdr first runs |
+| `~/.config/herdr/config.toml` | 3 | copied from `herdr/`, or merged | absent until Herdr first runs |
+| `~/.config/herdr/plugins/config/hhdebb.herdr-radar/config.toml` | 3 | copied from `herdr/`, or merged | absent until you save herdr-radar's settings |
 | `~/.claude/settings.json` | 3 | one key added | present if Claude Code is installed |
 | `~/.grok/config.toml` | 5 | edited only if the collision fires | conditional |
 | `~/.config/zed/settings.json` | 6 | one key added | present if Zed has been run |
@@ -45,7 +47,8 @@ mkdir -p ~/.dotfiles-backup
 
 for f in ~/.config/herdr/config.toml ~/.claude/settings.json ~/.grok/config.toml \
          ~/.config/ghostty/config.ghostty ~/.zshenv ~/.config/zed/settings.json \
-         ~/.config/hunk/config.toml ~/.docker/config.json; do
+         ~/.config/hunk/config.toml ~/.docker/config.json \
+         ~/.config/herdr/plugins/config/hhdebb.herdr-radar/config.toml; do
   if [ -e "$f" ]; then
     cp -p "$f" ~/.dotfiles-backup/"$(printf '%s' "${f#$HOME/.}" | tr / -)"
     echo "saved:  $f"
@@ -163,9 +166,11 @@ herdr plugin uninstall hhdebb.herdr-radar       # ...and the plugin itself
 cp -p ~/.dotfiles-backup/zshenv ~/.zshenv       # the ~/.zshenv from before the export block
 ```
 
-Run the `herdr` lines while Herdr is still installed. If `~/.zshenv` did not exist before,
-delete it instead of restoring it; the snapshot loop above reported which. Yazi's plugin code is
-inside the repo under `yazi/plugins/`, untracked, and goes away with the clone.
+Run the `herdr` lines while Herdr is still installed, and after the undo of
+[step 3](#3-configure-herdr) if you did that step: the plugin has to take its blocks out of Herdr's
+config before it goes. If `~/.zshenv` did not exist before, delete it instead of restoring it; the
+snapshot loop above reported which. Yazi's plugin code is inside the repo under `yazi/plugins/`,
+untracked, and goes away with the clone.
 
 Adoption has no undo that keeps the app: `brew uninstall --cask zed` removes the bundle Homebrew
 took over. To have it outside Homebrew again, reinstall it from the vendor's download.
@@ -270,46 +275,85 @@ and no identity at all — see [Public-repo hygiene](../AGENTS.md#public-repo-hy
 
 ---
 
-## 3. Herdr notifications
+## 3. Configure Herdr
 
-**What you get.** A macOS notification when an agent in any Herdr pane finishes or needs input,
-carrying your terminal's icon, with a click that raises the terminal and `prefix+g` that jumps to
-the pane behind it. Step 4 is what makes it stay on screen.
+**What you get.** Herdr set up from this repo's `herdr/` directory. A macOS notification when an
+agent in any Herdr pane finishes or needs input, carrying your terminal's icon, with a click that
+raises the terminal and `prefix+g` that jumps to the pane behind it; step 4 is what makes it stay
+on screen. And [herdr-radar](https://github.com/hhdebb/herdr-radar), the plugin step 1 installed,
+drawing the sidebar's Agents list: who is working and who is waiting on you, grouped by project,
+with `prefix+a` flipping its order and `prefix+comma` opening its settings.
 
-**Do this.** Three parts. First, Herdr's own configuration:
+**Do this.** Four parts, from the repository root, with Herdr running. No script does this for
+you: Herdr's config file is also written by Herdr itself and by herdr-radar, so the repo's copy is
+copied only where there is nothing to keep, and merged everywhere else. The prompt after the four
+parts hands the same work to a coding agent.
+
+First, Herdr's own configuration. This copies `herdr/config.toml` only onto a Mac where Herdr has
+no configuration yet, or none beyond the `onboarding = false` its first run writes; anywhere else
+it changes nothing and says so:
 
 ```sh
+cd <repo>
 mkdir -p ~/.config/herdr
-cat >> ~/.config/herdr/config.toml <<'EOF'
-[ui.toast]
-delivery = "system"
-delay_seconds = 1        # default; suppresses notifications for blips shorter than this
-
-[ui.sound]
-enabled = true
-
-[ui.sound.agents]        # optional: per-agent, "default" | "on" | "off"
-claude = "on"
-
-[keys]
-open_notification_target = "prefix+g"   # jump to the pane behind the last notification
-EOF
-
-herdr config check          # validate the TOML first
-herdr server reload-config  # hot-reload the running server
+if [ ! -e ~/.config/herdr/config.toml ] ||
+   [ "$(grep -Ev '^[[:space:]]*(#|$)' ~/.config/herdr/config.toml)" = 'onboarding = false' ]; then
+  cp herdr/config.toml ~/.config/herdr/config.toml && echo "copied"
+else
+  echo "~/.config/herdr/config.toml holds settings of its own: merge by hand"
+fi
+herdr config check
 ```
 
-If `config.toml` already defines any of those tables, **edit the keys in place instead of
-appending** — TOML rejects a table defined twice, and `herdr config check` is where you find out.
+To merge by hand, bring every table of `herdr/config.toml` across and keep everything of your own:
 
-Second, the agent-side integration, but only for an agent you launched for the first time *after*
-running step 1 (`setup.sh` registers it for every agent whose config directory already existed):
+- **Edit a table that already exists in place** instead of adding it again: TOML rejects a table
+  defined twice, and `herdr config check` is where you find out.
+- **Keep `[ui]` as a header line of its own**, even with no keys under it. herdr-radar writes its
+  tab-bar block directly below that line, and without it configures nothing at all.
+- **Leave herdr-radar's parts alone:** every line from a `# >>> herdr-radar … block` marker to its
+  `# <<< herdr-radar … block`, and `name` and `auto_switch` under `[theme]`.
+- **Never add** `tab_bar_right`, `tab_bar_right_separator`, `[theme.custom]` or any
+  `[ui.sidebar.…]` table. The plugin owns them, and drops its own block when it finds yours.
+
+`herdr config check` has to print `config: ok` before you go on.
+
+Second, herdr-radar's own settings, guarded the same way. The plugin's settings popup is the only
+other writer of this file, so one that exists holds choices you made there:
+
+```sh
+dir="$(herdr plugin config-dir hhdebb.herdr-radar)"
+if [ -e "$dir/config.toml" ]; then
+  echo "$dir/config.toml exists: merge by hand"
+else
+  mkdir -p "$dir" && cp herdr/plugins/hhdebb.herdr-radar/config.toml "$dir/" && echo "copied"
+fi
+```
+
+To merge, set each key from the repo's file in place. A comment goes on a line of its own: the
+popup rewrites every key line it saves, and drops a comment at the end of one.
+
+Third, make it live. The reload picks up Herdr's settings. `configure` writes herdr-radar's three
+blocks, and has to be run once by hand: the plugin's first start skips them for good if `[ui]` was
+missing then — see [the trap](agent-tooling.md#herdr-plugins). `state-restart` restarts only the
+plugin's own process, which reads its settings file when it starts. Nothing in your panes is
+touched:
+
+```sh
+herdr server reload-config
+herdr plugin action invoke hhdebb.herdr-radar.configure
+herdr plugin action invoke hhdebb.herdr-radar.state-restart
+```
+
+Fourth, the agent side of notifications. The integration, but only for an agent you launched for
+the first time *after* running step 1 (`setup.sh` registers it for every agent whose config
+directory already existed):
 
 ```sh
 herdr integration install claude
 ```
 
-Third, Claude Code's own notification channel, left enabled so the same agent still notifies
+Then Claude Code's own notification channel, left enabled so the same agent still notifies
 correctly on the days you run it outside Herdr. `iterm2_with_bell` emits the OSC 9 sequence Ghostty
 turns into a banner *and* a terminal bell — the bell is what Zed's Terminal Threads, and any other
 terminal that never parses OSC 9, key their "agent finished" popup on. In Ghostty the bell only
@@ -327,20 +371,51 @@ Herdr put there.
 Zed needs no step of its own: its Terminal Threads key their popup on that bell with Zed's default
 settings — see [One agent setting, three hosts](herdr-notifications.md#one-agent-setting-three-hosts).
 
+**Or hand it to an agent.** Paste this into a coding agent started in the repository. It points the
+agent at the parts above rather than repeating them, so the two cannot drift apart:
+
+```text
+Apply this repository's Herdr configuration to this Mac. Follow parts one to three of step 3 in
+docs/manual-setup.md, from the repository root, and do nothing that step does not describe.
+
+- Where a destination file already holds settings, merge by the rules written in that step.
+  Never replace such a file, and copy it to ~/.dotfiles-backup/ before you change it.
+- Leave every herdr-radar block, and name and auto_switch under [theme], exactly as they are.
+- Do not stop the Herdr server or kill Herdr: that ends every program in every pane, possibly
+  including you.
+- Finish with the step's Verify section, and report each key you added or changed, by file.
+```
+
 **Verify.**
 
 ```sh
-grep -A 1 '^\[ui\.toast\]' ~/.config/herdr/config.toml
+herdr config check
+grep -c '^# >>> herdr-radar' ~/.config/herdr/config.toml
+diff -B -I '^[[:space:]]*#' \
+  <(sed -E -e '/^# >>> herdr-radar/,/^# <<< herdr-radar/d' -e '/^(name|auto_switch) = /d' \
+  ~/.config/herdr/config.toml) herdr/config.toml
+diff "$(herdr plugin config-dir hhdebb.herdr-radar)/config.toml" \
+  herdr/plugins/hhdebb.herdr-radar/config.toml
 grep -o '"preferredNotifChannel": *"[^"]*"' ~/.claude/settings.json
 ```
 
 ```
-[ui.toast]
-delivery = "system"
+config: ok
+3
 "preferredNotifChannel": "iterm2_with_bell"
 ```
 
-Then the live test, which needs the Herdr server running:
+The `3` counts herdr-radar's blocks: tab bar, theme and sidebar. After a copy the two `diff`s print
+nothing. The first compares your file with the repo's, leaving out comments, blank lines,
+herdr-radar's blocks and its two `[theme]` keys: a line marked `>` is a repo setting your file
+lacks, one marked `<` is a setting of your own. Run it again whenever `herdr/config.toml` changes;
+its `>` lines are the merge to do.
+
+In Herdr, the sidebar's Agents list now groups agents under their workspace, each with its
+vendor's logo. If the logos come out as boxes, open a new Ghostty window, and restart Ghostty if
+they stay that way: a newly installed font reaches new windows, not the ones already open.
+
+Then the live test for notifications:
 
 ```sh
 herdr notification show "test" --body "hello" --sound done
@@ -353,17 +428,25 @@ opens Finder, `terminal-notifier` is missing — go back to step 1.
 **Undo.**
 
 ```sh
-rm ~/.config/herdr/config.toml       # or restore ~/.dotfiles-backup/config-herdr-config.toml
+herdr plugin action invoke hhdebb.herdr-radar.unconfigure   # its blocks out, [theme] restored
+cp -p ~/.dotfiles-backup/config-herdr-config.toml ~/.config/herdr/config.toml
+rm "$(herdr plugin config-dir hhdebb.herdr-radar)/config.toml"
 herdr server reload-config
 herdr integration uninstall claude   # only if you ran the install above
 ```
 
-Then remove the `"preferredNotifChannel"` key from `~/.claude/settings.json`, or restore
+If the snapshot loop reported `~/.config/herdr/config.toml` absent, delete it instead of restoring
+it. If it saved herdr-radar's settings file, restore
+`~/.dotfiles-backup/config-herdr-plugins-config-hhdebb.herdr-radar-config.toml` instead of deleting
+it. Then remove the `"preferredNotifChannel"` key from `~/.claude/settings.json`, or restore
 `~/.dotfiles-backup/claude-settings.json`.
 
-**Why it works this way.** Herdr owns the PTY, so the notification escape sequence your agent emits
-never reaches the terminal and `delivery = "system"` is what replaces it — see
-[The four delivery modes](herdr-notifications.md#the-four-delivery-modes).
+**Why it works this way.** Herdr has no include directive, and its config file has two other
+writers, Herdr's own settings panel and herdr-radar, so no script here writes it; see
+[ADR 0013](decisions/0013-apply-the-herdr-config-by-hand.md). How the plugin is pinned and kept
+current: [Herdr plugins](agent-tooling.md#herdr-plugins). Herdr owns the PTY, so the notification
+escape sequence your agent emits never reaches the terminal and `delivery = "system"` is what
+replaces it — see [The four delivery modes](herdr-notifications.md#the-four-delivery-modes).
 
 ---
 
@@ -600,7 +683,7 @@ The rest stays, and stays here:
 |---|---|
 | [1. Install the tools and place configs](#1-install-the-tools-and-place-configs) | the two-script split: `setup.sh` needs the network, `install.sh` may not |
 | [2. Install and authenticate the coding agents](#2-install-and-authenticate-the-coding-agents) | interactive OAuth; nothing types a password into a browser for you |
-| [3. Herdr notifications](#3-herdr-notifications) | Herdr has no include mechanism; agent settings unmanaged per ADR 0005 |
+| [3. Configure Herdr](#3-configure-herdr) | Herdr's config file is also written by Herdr and herdr-radar; kept in `herdr/` and applied by hand per ADR 0013 |
 | [4. Allow notifications and make them stay on screen](#4-allow-notifications-and-make-them-stay-on-screen) | two GUI toggles only you can flip |
 | [5. Known collisions to check](#5-known-collisions-to-check) | detection is automatable; the remedy edits files this repo does not manage |
 | [6. Yazi icons in Zed's terminal](#6-yazi-icons-in-zeds-terminal) | Zed's settings are unmanaged per ADR 0005 |

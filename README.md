@@ -73,8 +73,8 @@ toggle cannot be scripted; [Manual setup](docs/manual-setup.md) walks through th
 with a check and an undo.
 
 > **Status:** this repo is being built in the open. Tool installation, git defaults, and the
-> Ghostty, Yazi and hunk configurations are live; the shell configuration and runtime versions
-> follow. [`CHANGELOG.md`](CHANGELOG.md) tracks what has arrived.
+> Ghostty, Yazi, hunk and Herdr configurations are live; the shell configuration and runtime
+> versions follow. [`CHANGELOG.md`](CHANGELOG.md) tracks what has arrived.
 
 ## The tools
 
@@ -84,7 +84,7 @@ to the projects.
 | Tool | What it is here |
 |---|---|
 | [Ghostty](https://ghostty.org) | The terminal. Managed config; machine-local overrides in `local.ghostty`. |
-| [Herdr](https://herdr.dev) | A terminal multiplexer built for running coding agents in panes. Installed, not configured here. |
+| [Herdr](https://herdr.dev) | A terminal multiplexer built for running coding agents in panes. Config and the pinned [herdr-radar](https://github.com/hhdebb/herdr-radar) sidebar plugin kept in `herdr/`; applied by hand or by an agent, never by a script. |
 | [Yazi](https://yazi-rs.github.io) | Terminal file manager. Managed config, reached through `YAZI_CONFIG_HOME`. |
 | [hunk](https://hunk.dev) | Read-only diff viewer with a live watch mode. Managed config, copied. |
 | [micro](https://micro-editor.github.io) | Terminal editor for quick edits beside a running agent. |
@@ -113,6 +113,7 @@ an account stays on your machine, untracked, and the docs say where.
 | **terminal** | the Ghostty configuration | machine-specific display and font tweaks, in `local.ghostty` |
 | **files** | the Yazi configuration: openers, Markdown preview, git status marks | nothing — Yazi reads one directory, so there is no local layer |
 | **review** | the hunk configuration | a per-project `.hunk/config.toml`, if a repository needs one |
+| **multiplexer** | the Herdr configuration, its pinned plugin and the plugin's settings — applied by hand | whatever Herdr's settings panel saves, and the blocks herdr-radar writes into Herdr's config |
 | **shell** *(planned)* | the zsh configuration | secrets, tokens, anything host-specific |
 
 The git line is the one worth stating outright: **this repo will never contain a `[user]`
@@ -233,6 +234,7 @@ manual — see [Manual setup](docs/manual-setup.md).
 | `ghostty/` | Managed Ghostty configuration |
 | `yazi/` | Managed Yazi configuration; `plugins/` inside it is restored by `setup.sh` and untracked |
 | `hunk/` | Managed hunk configuration; copied to its destination rather than included |
+| `herdr/` | Herdr configuration, plugin pins and plugin settings; applied by hand — [manual setup, step 3](docs/manual-setup.md#3-configure-herdr) |
 | [`renovate.json`](renovate.json) | Renovate, limited to bumping the Herdr plugin pins; Dependabot keeps the GitHub Actions |
 | [`LICENSE`](LICENSE) | MIT — see [Licence and scope](#licence-and-scope) |
 | `docs/` | Deep dives on the pieces whose reasoning is not obvious from the code |

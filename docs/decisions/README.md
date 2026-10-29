@@ -14,7 +14,7 @@ the cost that was accepted.
 | [0002](0002-include-git-config-from-xdg-never-gitconfig.md) | Include git config from `~/.config/git/config`, never `~/.gitconfig` — your own settings win by construction | Accepted |
 | [0003](0003-install-daily-tools-through-homebrew.md) | Install daily tools through Homebrew — one `Brewfile`, no vendor curl scripts | Accepted |
 | [0004](0004-let-auto-updating-casks-manage-their-own-versions.md) | Let auto-updating casks manage their own versions — never `--greedy` | Accepted |
-| [0005](0005-install-agent-tooling-without-managing-its-config.md) | Install agent tooling without managing its config — tools that rewrite their own settings stay unmanaged | Accepted |
+| [0005](0005-install-agent-tooling-without-managing-its-config.md) | Install agent tooling without managing its config — tools that rewrite their own settings stay unmanaged; Herdr is revisited in 0013 | Accepted |
 | [0006](0006-manage-shared-destinations-with-delimited-blocks.md) | Manage shared destinations with named delimited blocks — own one BEGIN/END block, preserve every other byte | Accepted |
 | [0007](0007-leave-pre-existing-apps-unadopted-by-default.md) | Leave pre-existing apps unadopted by default — `--adopt` opts in after checking the macOS permission | Accepted |
 | [0008](0008-keep-one-agent-notification-channel-across-hosts.md) | Keep one agent notification channel across Zed, Ghostty and Herdr — `iterm2_with_bell` | Accepted |
@@ -22,6 +22,7 @@ the cost that was accepted.
 | [0010](0010-export-a-config-directory-variable-from-zshenv.md) | Export a config-directory variable from `~/.zshenv` — Yazi reads the repo directory itself | Accepted |
 | [0011](0011-copy-the-hunk-config-and-report-drift.md) | Copy the hunk config and report drift — no include mechanism, and TOML forbids a shared block | Accepted |
 | [0012](0012-replace-glow-with-leaf-for-markdown.md) | Replace Glow with Homebrew-installed Leaf for Markdown reading and previews, using the dark Ocean theme | Accepted |
+| [0013](0013-apply-the-herdr-config-by-hand.md) | Apply the Herdr config by hand — tracked in `herdr/`, copied or merged by a person or an agent, written by no script | Accepted |
 
 Three of these are the ones to know before editing anything: 0001 for the delivery model, 0002 for
 why git is the exception that avoids sharing a file at all, and 0009 for the precedence trap where

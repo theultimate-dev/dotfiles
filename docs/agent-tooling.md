@@ -188,7 +188,10 @@ hhdebb.herdr-radar hhdebb/herdr-radar v1.5.0 79a81bbddc017a4349713e282b1a01ee360
 
 The one there today is [herdr-radar](https://github.com/hhdebb/herdr-radar), which turns Herdr's
 sidebar into a list you can read at a glance: who is working, who is waiting on you, who went
-quiet.
+quiet. Its own settings are tracked in `herdr/plugins/hhdebb.herdr-radar/config.toml`. That file
+and [`herdr/config.toml`](../herdr/config.toml) reach a Mac by hand or through a coding agent, never
+through a script — see [step 3 of the manual setup](manual-setup.md#3-configure-herdr), and
+[ADR 0013](decisions/0013-apply-the-herdr-config-by-hand.md) for why.
 
 - **Converging on the pin:** a plugin that `herdr plugin list` already shows at the pinned commit is
   left alone, enabled or not. Anything else is installed with `herdr plugin install --yes --ref
@@ -203,9 +206,17 @@ quiet.
   one on the `^{}` line, not the tag object above it.
 - **A running Herdr keeps the old version** of a plugin until Herdr restarts. herdr-radar can
   switch without ending anything running in your panes: its `state-restart` action restarts only
-  its own process.
+  its own process, the way part three of [step 3](manual-setup.md#3-configure-herdr) runs it.
 - **Node, not Python:** the pinned plugins run on Node 18 or newer, which this repository does not
   install yet. `setup.sh` warns when `node` is missing from `PATH`.
+
+**herdr-radar fails silently without a bare `[ui]` table.** On its first start it writes three
+marker-fenced blocks into `~/.config/herdr/config.toml`: the tab bar, the theme, and the sidebar
+rows. If that file has no `[ui]` header line, it refuses, says so in a notification that is easy
+to miss, and still records its first-run setup as done. No later start retries, so the sidebar
+stays Herdr's own and nothing says why. [`herdr/config.toml`](../herdr/config.toml) carries the
+`[ui]` line; with it in place, the plugin's `configure` action writes the blocks, which part three
+of [step 3](manual-setup.md#3-configure-herdr) runs once for exactly this reason.
 
 **What herdr-radar writes outside Herdr's own directories:** its icon font, into
 `~/Library/Fonts`, and a `# >>> herdr-radar font block` of `font-codepoint-map` lines appended to
