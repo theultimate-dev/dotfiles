@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Colima with the Docker CLI and its Compose and Buildx plugins in the `Brewfile`: Docker's engine
+  in a Linux VM on Apple's Virtualization.framework, with no Docker Desktop. The VM runs only when
+  you start it. [docs/colima.md](docs/colima.md) explains the flags for Apple silicon, how to size
+  the CPUs, memory and disk for several Compose stacks at once, and four traps, including file
+  watchers in containers that never see your edits without `--mount-inotify`. **Upgrade steps:**
+  run `./setup.sh`, then
+  [step 8 of the manual setup](docs/manual-setup.md#8-run-containers-with-colima), which lists
+  Homebrew's plugin directory in `~/.docker/config.json` and creates the VM.
+
 ## [0.2.0] - 2026-09-19
 
 ### Added

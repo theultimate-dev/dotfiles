@@ -18,6 +18,11 @@ brew "jq"                 # Yazi: JSON preview
 brew "sevenzip"           # Yazi: archive preview and extraction
 brew "resvg"              # Yazi: SVG preview
 
+brew "colima"             # container runtime: Docker's engine in a Lima VM, no Docker Desktop; see docs/colima.md
+brew "docker"             # the Docker CLI only. NOT cask "docker" — Homebrew resolves that to Docker Desktop
+brew "docker-compose"     # `docker compose` plugin; found through cliPluginsExtraDirs, see docs/colima.md
+brew "docker-buildx"      # BuildKit builder plugin; without it `docker build` uses the deprecated legacy builder
+
 cask "ghostty"
 cask "zed"
 cask "t3-code"            # alpha GUI control plane, not a CLI — see docs/agent-tooling.md
