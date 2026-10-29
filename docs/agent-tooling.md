@@ -12,7 +12,7 @@ Every daily tool in this repository is delivered via Homebrew:
 
 - **Terminal emulator:** [Ghostty](https://ghostty.org).
 - **Editors:** [micro](https://micro-editor.github.io) in the terminal, for quick edits next to a
-  running agent; [Zed](https://zed.dev) and [T3 Code](https://t3.codes) as GUI apps.
+  running agent; [Zed](https://zed.dev) as a GUI app.
 - **Terminal multiplexer & notifier:** [Herdr](https://herdr.dev) and
   [`terminal-notifier`](https://github.com/julienXX/terminal-notifier).
 - **Coding agent CLIs:** [OpenAI Codex](https://github.com/openai/codex),
@@ -63,10 +63,6 @@ Homebrew casks avoid these pathologies by isolating downloads, staging applicati
 
 ### Specific tools deliberately handled differently
 
-- **T3 Code (`cask "t3-code"`):** Ships in the `Brewfile` following the macOS installation
-  instructions in its upstream repository. Note that T3 Code is an **alpha GUI control plane**, not
-  a command-line interface. It lives in `/Applications/T3 Code (Alpha).app` and requires interactive
-  provider setup.
 - **No Claude Code in `Brewfile`:** Anthropic distributes [Claude Code](https://claude.ai/code) via
   its native installer into `~/.local/bin/claude`. The Homebrew cask `claude-code` installs an
   older binary to `/opt/homebrew/bin/claude`. On a machine where `~/.local/bin` precedes Homebrew
@@ -99,8 +95,8 @@ user profile.
 
 ## `auto_updates` casks: installer-of-record, not version manager
 
-Five casks declared in `Brewfile` (`ghostty`, `zed`, `t3-code`, `copilot-cli`, `antigravity-cli`)
-are declared with `auto_updates true` in Homebrew Cask.
+Four casks declared in `Brewfile` (`ghostty`, `zed`, `copilot-cli`, `antigravity-cli`) are
+declared with `auto_updates true` in Homebrew Cask.
 
 For these packages, **Homebrew serves as the installer-of-record, not the ongoing version
 manager**.
@@ -237,8 +233,8 @@ must be applied manually once Grok has been initialized.
 
 ## Apps you installed before Homebrew did
 
-`setup.sh` looks at every cask in the `Brewfile` that installs an application bundle — Ghostty,
-Zed, T3 Code — and treats the app as **pre-existing and unmanaged** when the bundle is already in
+`setup.sh` looks at every cask in the `Brewfile` that installs an application bundle — Ghostty
+and Zed — and treats the app as **pre-existing and unmanaged** when the bundle is already in
 `/Applications` but Homebrew has no Caskroom entry for it. Those apps are skipped, through
 `HOMEBREW_BUNDLE_CASK_SKIP`, and listed. Nothing is adopted unless `setup.sh` is run with
 `--adopt`. The reason is what adoption actually does:
@@ -248,8 +244,7 @@ Zed, T3 Code — and treats the app as **pre-existing and unmanaged** when the b
   `Zed.app/Contents/MacOS/cli` to `/opt/homebrew/bin/zed` — Homebrew writes a Spotlight
   alternate-name attribute onto that file. Since macOS 13, modifying an app bundle that your
   terminal did not install requires the **App Management** privacy permission, so macOS shows a
-  dialog asking to let the terminal update or delete other applications. T3 Code adopts silently
-  because its cask has nothing inside the bundle to touch.
+  dialog asking to let the terminal update or delete other applications.
 - The attempt that triggers the dialog fails with `Operation not permitted` whatever you answer;
   Homebrew's own advice is to approve and run the command again. `brew install`, however, treats
   the failure as an install error and rolls back: it copies the app into the Caskroom as a backup,

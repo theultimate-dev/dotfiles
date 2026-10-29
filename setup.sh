@@ -55,7 +55,7 @@ fi
 
 # ── Apps installed outside Homebrew ───────────────────────────────────────
 # Every cask in the Brewfile that installs an application bundle, paired with
-# the bundle name. One per line rather than one per word: one name has spaces.
+# the bundle name. One per line rather than one per word, so a name may hold spaces.
 #
 # An app is "pre-existing and unmanaged" when the bundle is in /Applications
 # but Homebrew has no Caskroom entry for it -- Homebrew's own definition of
@@ -68,8 +68,7 @@ fi
 # probing the permission, before brew bundle can reach the destructive path.
 # See docs/agent-tooling.md, "Apps you installed before Homebrew did".
 CASK_APPS='ghostty:Ghostty.app
-zed:Zed.app
-t3-code:T3 Code (Alpha).app'
+zed:Zed.app'
 
 CASKROOM="$(brew --prefix)/Caskroom"
 UNMANAGED_TOKENS=""

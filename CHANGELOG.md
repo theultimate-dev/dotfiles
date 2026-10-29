@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+
+- T3 Code. It is no longer in the `Brewfile`, `setup.sh` neither installs it nor reports a copy
+  you installed by hand, and its step in the manual setup is gone, so the later steps there move
+  up one number: Herdr notifications is now step 3 and Colima step 7. An existing installation is
+  left alone; to remove it, run `brew uninstall --cask t3-code`, and revoke any provider API keys
+  you issued for it.
+
 ## [0.3.0] - 2026-10-29
 
 ### Added
