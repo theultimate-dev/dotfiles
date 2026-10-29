@@ -1,5 +1,7 @@
-# Keeps the actions used by the workflows in this directory current. The repo has no other
-# dependency ecosystem: the tools themselves are installed by Homebrew and pinned nowhere here.
+# Keeps the actions used by the workflows in this directory current. The tools themselves are
+# installed by Homebrew and pinned nowhere here. The one other pin, the Herdr plugins in
+# herdr/plugins.txt, sits in a plain file Dependabot cannot read; Renovate watches that one
+# (renovate.json).
 version: 2
 updates:
   - package-ecosystem: github-actions

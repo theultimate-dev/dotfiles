@@ -194,6 +194,13 @@ quiet.
   left alone, enabled or not. Anything else is installed with `herdr plugin install --yes --ref
   <tag>`, and `setup.sh` warns when the tag now resolves to a different commit. A tag that moved
   after it was pinned is worth a look before you trust it.
+- **Bumps:** [Renovate](https://docs.renovatebot.com) opens a pull request when a pinned plugin
+  publishes a newer tag, changing the tag and the commit together. `renovate.json` limits it to
+  this one file; Dependabot keeps the GitHub Actions, and cannot take this over, because it reads
+  package manifests rather than a pin in a plain file. A plugin upgrade is user-facing, so the pull
+  request needs a `CHANGELOG.md` entry before it is merged. To bump by hand, take both values from
+  `git ls-remote --tags https://github.com/<owner>/<repo>`; for an annotated tag the commit is the
+  one on the `^{}` line, not the tag object above it.
 - **A running Herdr keeps the old version** of a plugin until Herdr restarts. herdr-radar can
   switch without ending anything running in your panes: its `state-restart` action restarts only
   its own process.

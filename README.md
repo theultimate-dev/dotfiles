@@ -233,6 +233,7 @@ manual — see [Manual setup](docs/manual-setup.md).
 | `ghostty/` | Managed Ghostty configuration |
 | `yazi/` | Managed Yazi configuration; `plugins/` inside it is restored by `setup.sh` and untracked |
 | `hunk/` | Managed hunk configuration; copied to its destination rather than included |
+| [`renovate.json`](renovate.json) | Renovate, limited to bumping the Herdr plugin pins; Dependabot keeps the GitHub Actions |
 | [`LICENSE`](LICENSE) | MIT — see [Licence and scope](#licence-and-scope) |
 | `docs/` | Deep dives on the pieces whose reasoning is not obvious from the code |
 | [`docs/decisions/`](docs/decisions/README.md) | Architecture decision records, with an index — why a choice was made, and what was rejected |

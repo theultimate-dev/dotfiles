@@ -1,0 +1,25 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "description": [
+    "Renovate watches one thing here: the Herdr plugins pinned in herdr/plugins.txt.",
+    "Dependabot keeps the GitHub Actions current (.github/dependabot.yml); it cannot read a pin in a plain file."
+  ],
+  "enabledManagers": ["custom.regex"],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "A Herdr plugin pinned to a release tag and the commit that tag points at.",
+      "managerFilePatterns": ["/^herdr/plugins\\.txt$/"],
+      "matchStrings": [
+        "(?<depName>[\\w.-]+/[\\w.-]+) (?<currentValue>v\\S+) (?<currentDigest>[0-9a-f]{40})"
+      ],
+      "datasourceTemplate": "github-tags"
+    }
+  ],
+  "dependencyDashboard": false,
+  "semanticCommits": "enabled",
+  "semanticCommitType": "chore",
+  "semanticCommitScope": "herdr",
+  "commitMessageAction": "bumped",
+  "commitMessageTopic": "{{depName}}"
+}
