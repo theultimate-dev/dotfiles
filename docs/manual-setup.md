@@ -31,9 +31,11 @@ symlink, and no step overwrites a file wholesale:
 in `~/.zshenv` — and one whole file, `~/.config/hunk/config.toml`, which it owns outright because
 hunk has no include mechanism to hook into. It takes its own backups before touching any of them.
 Steps 1 and 2 also install software and write credentials, but only into each tool's own
-configuration directory, and step 7 creates Colima's VM in Colima's own `~/.colima` and caches its
-image in `~/Library/Caches/colima`. Steps 2 and 4 are interactive — a browser login, a settings
-pane — and have no terminal equivalent.
+configuration directory. The one exception is the Herdr plugin `setup.sh` installs: it copies its
+icon font into `~/Library/Fonts` and appends a block of its own, fenced by `herdr-radar` markers,
+to `~/.config/ghostty/config.ghostty`. Step 7 creates Colima's VM in Colima's own `~/.colima` and
+caches its image in `~/Library/Caches/colima`. Steps 2 and 4 are interactive — a browser login, a
+settings pane — and have no terminal equivalent.
 
 **Snapshot.** Do this once, before step 1. It is the difference between "I changed something" and
 "I can put it back":
@@ -85,14 +87,15 @@ skipped step 1 there is simply nothing there to configure.)
 
 **What you get.** Homebrew plus every tool the rest of this guide configures — Ghostty, Zed, Herdr,
 `terminal-notifier`, Yazi with Leaf and the tools its previews run through, Colima with the Docker
-CLI and its Compose and Buildx plugins, and the coding agent CLIs — installed and on
-`$PATH`, with Herdr's session-identity integration registered for each agent whose config directory
-already exists, Yazi's two plugins restored from the tracked lockfile, and the git and Ghostty
-include stubs plus the `YAZI_CONFIG_HOME` export in `~/.zshenv` placed atomically via
-`./install.sh`. Open a new shell afterwards, or run `source ~/.zshenv; rehash` in this one:
-`~/.zshenv` is read at shell start, so a Yazi started from the shell that ran the installer does
-not see the export, and inside this repo that same shell's stale command hash plus zsh's `auto_cd`
-turn a bare `yazi` into `cd yazi/` — see [the trap](yazi.md#trap-the-shell-you-installed-from).
+CLI and its Compose and Buildx plugins, and the coding agent CLIs — installed and on `$PATH`, with
+Herdr's session-identity integration registered for each agent whose config directory already
+exists, the Herdr plugins pinned in `herdr/plugins.txt` installed at their pinned release, Yazi's
+two plugins restored from the tracked lockfile, and the git and Ghostty include stubs plus the
+`YAZI_CONFIG_HOME` export in `~/.zshenv` placed atomically via `./install.sh`. Open a new shell
+afterwards, or run `source ~/.zshenv; rehash` in this one: `~/.zshenv` is read at shell start, so
+a Yazi started from the shell that ran the installer does not see the export, and inside this repo
+that same shell's stale command hash plus zsh's `auto_cd` turn a bare `yazi` into `cd yazi/` — see
+[the trap](yazi.md#trap-the-shell-you-installed-from).
 
 **Do this.**
 
@@ -103,7 +106,8 @@ cd <repo>
 ```
 
 Re-running is safe and convergent: `setup.sh` upgrades what Homebrew manages, leaves applications
-you had installed by hand alone, and skips integrations already marked current. `install.sh`
+you had installed by hand alone, skips integrations already marked current, and leaves a Herdr
+plugin alone once it is at its pinned commit. `install.sh`
 verifies and maintains native include stubs without touching existing user configurations.
 
 **Already have Ghostty or Zed in `/Applications`?** `setup.sh` lists an app it did not
@@ -154,12 +158,14 @@ brew bundle list --all --file=<repo>/Brewfile   # everything setup.sh installed
 brew uninstall --cask ghostty                   # ...one entry at a time
 brew uninstall yazi leaf-markdown-viewer         # ...Yazi and its reader likewise
 herdr integration uninstall claude              # ...and any integration it registered
+herdr plugin action invoke hhdebb.herdr-radar.uninstall-font   # the plugin's font and Ghostty block
+herdr plugin uninstall hhdebb.herdr-radar       # ...and the plugin itself
 cp -p ~/.dotfiles-backup/zshenv ~/.zshenv       # the ~/.zshenv from before the export block
 ```
 
-If `~/.zshenv` did not exist before, delete it instead of restoring it; the snapshot loop above
-reported which. Yazi's plugin code is inside the repo under `yazi/plugins/`, untracked, and goes
-away with the clone.
+Run the `herdr` lines while Herdr is still installed. If `~/.zshenv` did not exist before,
+delete it instead of restoring it; the snapshot loop above reported which. Yazi's plugin code is
+inside the repo under `yazi/plugins/`, untracked, and goes away with the clone.
 
 Adoption has no undo that keeps the app: `brew uninstall --cask zed` removes the bundle Homebrew
 took over. To have it outside Homebrew again, reinstall it from the vendor's download.
