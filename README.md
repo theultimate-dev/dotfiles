@@ -90,7 +90,6 @@ to the projects.
 | [micro](https://micro-editor.github.io) | Terminal editor for quick edits beside a running agent. |
 | [Leaf](https://github.com/RivoLink/leaf) | Markdown reader; Yazi's preview and its `.md` opener. |
 | [Zed](https://zed.dev) | GUI editor. Installed; its settings stay yours. |
-| [T3 Code](https://t3.codes) | An alpha GUI control plane for coding agents. Installed; needs your own provider keys. |
 | [Claude Code](https://claude.ai/code) | Anthropic's agent CLI. Installed by its own installer, deliberately not through Homebrew. |
 | [Codex](https://github.com/openai/codex), [Copilot CLI](https://docs.github.com/en/copilot/concepts/agents/about-copilot-cli), [Antigravity CLI](https://antigravity.google/product/antigravity-cli) (`agy`), [Grok Build](https://x.ai/build) | The other agent CLIs, all from the `Brewfile`. |
 | [GitHub CLI](https://cli.github.com) | Feeds a pull request into hunk for review. |
@@ -204,8 +203,8 @@ The split exists so that config placement never depends on the network and stays
 half-broken machine.
 
 `setup.sh` installs the daily tools via Homebrew (Ghostty, micro, hunk, Yazi and Leaf with the
-tools Yazi previews through, Zed, T3 Code, Herdr, Colima with the Docker CLI, and coding agent
-CLIs), restores Yazi's plugins from the tracked lockfile, and configures Herdr agent integrations.
+tools Yazi previews through, Zed, Herdr, Colima with the Docker CLI, and coding agent CLIs),
+restores Yazi's plugins from the tracked lockfile, and configures Herdr agent integrations.
 Re-running it is safe and convergent. An app installed by hand before is left alone and reported;
 `./setup.sh --adopt` hands it to Homebrew, after explaining the macOS permission prompt that needs.
 

@@ -7,7 +7,7 @@ Compose stacks running at once, and the traps that only show up once they do.
 Verified against **Colima 0.10.3**, **Docker CLI 29.9.2**, **Compose 5.6.1** and
 **Buildx 0.38.1** on macOS 27 with an Apple M5, running the five-container web stack described
 under sizing. The commands themselves are in
-[manual setup, step 8](manual-setup.md#8-run-containers-with-colima).
+[manual setup, step 7](manual-setup.md#7-run-containers-with-colima).
 
 ## What you get
 
@@ -35,7 +35,7 @@ Colima's own FAQ suggests symlinking each plugin into `~/.docker/cli-plugins`. T
 here, as every symlink into `$HOME` is (see
 [ADR 0001](decisions/0001-deliver-configs-as-include-stubs-not-symlinks.md)). Listing the directory
 is one key in a file Docker already owns, it survives plugin upgrades, and it is added by hand in
-step 8 rather than by the installer. `config.json` is shared with Docker itself: Colima writes the
+step 7 rather than by the installer. `config.json` is shared with Docker itself: Colima writes the
 current context into it, and `docker login` may write credentials into it.
 
 ## The flags that matter on Apple silicon

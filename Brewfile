@@ -25,7 +25,6 @@ brew "docker-buildx"      # BuildKit builder plugin; without it `docker build` u
 
 cask "ghostty"
 cask "zed"
-cask "t3-code"            # alpha GUI control plane, not a CLI — see docs/agent-tooling.md
 cask "font-symbols-only-nerd-font"  # Yazi icons in Zed's terminal; Ghostty has them built in
 
 cask "codex"              # OpenAI Codex CLI. NOT cask "codex-app" (discontinued upstream)

@@ -190,7 +190,7 @@ the terminal, not on Yazi:
   `font-symbols-only-nerd-font` cask for it, and Zed still has to be told to fall back to that
   font. Zed's settings are unmanaged here
   ([ADR 0005](decisions/0005-install-agent-tooling-without-managing-its-config.md)), so the
-  edit is a manual step, in [Manual setup](manual-setup.md#7-yazi-icons-in-zeds-terminal).
+  edit is a manual step, in [Manual setup](manual-setup.md#6-yazi-icons-in-zeds-terminal).
 
 Without the font, the icons show as empty boxes; Yazi itself works.
 

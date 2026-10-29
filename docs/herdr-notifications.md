@@ -47,7 +47,7 @@ is on `PATH`, and falls back to `osascript` if it is not. On Linux it uses `noti
 ## Recommended setup: local agents on macOS
 
 Herdr reads `~/.config/herdr/config.toml`, and four values in it are worth setting deliberately.
-[Step 4 of the manual setup guide](manual-setup.md#4-herdr-notifications) carries the file contents,
+[Step 3 of the manual setup guide](manual-setup.md#3-herdr-notifications) carries the file contents,
 the reload command and the rollback; this section is why each value is what it is.
 
 **`delivery = "system"`, under `[ui.toast]`.** The one that matters. Herdr owns the PTY, so the
@@ -152,7 +152,7 @@ Herdr's notifications are posted by `terminal-notifier`, so that is the app whos
 Ghostty's own style matters on the days you run an agent in a bare terminal. Until you flip it,
 everything is configured correctly and the banner is simply gone before you look up — the symptom
 is "nothing happened", not an error.
-[Step 5 of the manual setup guide](manual-setup.md#5-allow-notifications-and-make-them-stay-on-screen)
+[Step 4 of the manual setup guide](manual-setup.md#4-allow-notifications-and-make-them-stay-on-screen)
 has the click path and the check.
 
 Why this is a hand step and not part of `install.sh`: the setting lives in `com.apple.ncprefs`, a
@@ -196,7 +196,7 @@ going silent everywhere.
 
 Herdr ships integrations that teach each agent to report its session to the multiplexer. `setup.sh`
 registers them for every agent whose configuration directory already exists;
-[step 4 of the manual setup guide](manual-setup.md#4-herdr-notifications) covers installing one for
+[step 3 of the manual setup guide](manual-setup.md#3-herdr-notifications) covers installing one for
 an agent that arrived afterwards.
 
 For Claude Code the integration drops `~/.claude/hooks/herdr-agent-state.sh` and registers it as a
@@ -250,5 +250,5 @@ audible sound; the popup does not depend on it. Claude Code's `auto` channel key
 - [Ghostty configuration reference](https://ghostty.org/docs/config/reference)
 - [ADR 0008](decisions/0008-keep-one-agent-notification-channel-across-hosts.md) — the decision and
   the alternatives that lost
-- [Manual setup, step 5](manual-setup.md#5-allow-notifications-and-make-them-stay-on-screen) — the
+- [Manual setup, step 4](manual-setup.md#4-allow-notifications-and-make-them-stay-on-screen) — the
   permission and the alert style, with a check for each

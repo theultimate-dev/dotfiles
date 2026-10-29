@@ -20,19 +20,19 @@ symlink, and no step overwrites a file wholesale:
 
 | Path | Step | Action | Present today? |
 |---|---|---|---|
-| `~/.config/herdr/config.toml` | 4 | created, or edited | absent until Herdr first runs |
-| `~/.claude/settings.json` | 4 | one key added | present if Claude Code is installed |
-| `~/.grok/config.toml` | 6 | edited only if the collision fires | conditional |
-| `~/.config/zed/settings.json` | 7 | one key added | present if Zed has been run |
-| `~/.docker/config.json` | 8 | one key added; Colima then sets the current context, defined in `~/.docker/contexts/` | absent until Docker or Colima first runs |
+| `~/.config/herdr/config.toml` | 3 | created, or edited | absent until Herdr first runs |
+| `~/.claude/settings.json` | 3 | one key added | present if Claude Code is installed |
+| `~/.grok/config.toml` | 5 | edited only if the collision fires | conditional |
+| `~/.config/zed/settings.json` | 6 | one key added | present if Zed has been run |
+| `~/.docker/config.json` | 7 | one key added; Colima then sets the current context, defined in `~/.docker/contexts/` | absent until Docker or Colima first runs |
 
 `install.sh` in step 1 additionally writes three managed blocks — the include stubs
 `~/.config/git/config` and `~/.config/ghostty/config.ghostty`, and an `export` of `YAZI_CONFIG_HOME`
 in `~/.zshenv` — and one whole file, `~/.config/hunk/config.toml`, which it owns outright because
 hunk has no include mechanism to hook into. It takes its own backups before touching any of them.
-Steps 1 to 3 also install software and write credentials, but only into each tool's own
-configuration directory, and step 8 creates Colima's VM in Colima's own `~/.colima` and caches its
-image in `~/Library/Caches/colima`. Steps 2, 3 and 5 are interactive — a browser login, a settings
+Steps 1 and 2 also install software and write credentials, but only into each tool's own
+configuration directory, and step 7 creates Colima's VM in Colima's own `~/.colima` and caches its
+image in `~/Library/Caches/colima`. Steps 2 and 4 are interactive — a browser login, a settings
 pane — and have no terminal equivalent.
 
 **Snapshot.** Do this once, before step 1. It is the difference between "I changed something" and
@@ -74,9 +74,9 @@ known-good state than from a half-applied one.
 **Roll back.** The shape is the same everywhere: restore the copy in `~/.dotfiles-backup`, or delete
 the file outright if the loop above reported it absent. Each step below names its own.
 
-**Order.** Steps 1 to 3 run in sequence — you cannot log in to a tool that is not installed yet.
-Steps 4 to 8 are independent of each other and of the first three: run them in any order, or skip
-the ones you do not want. (Steps 4, 6, 7 and 8 configure tools that step 1 installs; if you
+**Order.** Steps 1 and 2 run in sequence — you cannot log in to a tool that is not installed yet.
+Steps 3 to 7 are independent of each other and of the first two: run them in any order, or skip
+the ones you do not want. (Steps 3, 5, 6 and 7 configure tools that step 1 installs; if you
 skipped step 1 there is simply nothing there to configure.)
 
 ---
@@ -84,8 +84,8 @@ skipped step 1 there is simply nothing there to configure.)
 ## 1. Install the tools and place configs
 
 **What you get.** Homebrew plus every tool the rest of this guide configures — Ghostty, Zed, Herdr,
-T3 Code, `terminal-notifier`, Yazi with Leaf and the tools its previews run through, Colima with
-the Docker CLI and its Compose and Buildx plugins, and the coding agent CLIs — installed and on
+`terminal-notifier`, Yazi with Leaf and the tools its previews run through, Colima with the Docker
+CLI and its Compose and Buildx plugins, and the coding agent CLIs — installed and on
 `$PATH`, with Herdr's session-identity integration registered for each agent whose config directory
 already exists, Yazi's two plugins restored from the tracked lockfile, and the git and Ghostty
 include stubs plus the `YAZI_CONFIG_HOME` export in `~/.zshenv` placed atomically via
@@ -106,7 +106,7 @@ Re-running is safe and convergent: `setup.sh` upgrades what Homebrew manages, le
 you had installed by hand alone, and skips integrations already marked current. `install.sh`
 verifies and maintains native include stubs without touching existing user configurations.
 
-**Already have Ghostty, Zed or T3 Code in `/Applications`?** `setup.sh` lists an app it did not
+**Already have Ghostty or Zed in `/Applications`?** `setup.sh` lists an app it did not
 install, leaves it alone, and installs everything else. To hand those apps over to Homebrew:
 
 ```sh
@@ -264,40 +264,11 @@ and no identity at all — see [Public-repo hygiene](../AGENTS.md#public-repo-hy
 
 ---
 
-## 3. Configure T3 Code
-
-**What you get.** T3 Code can reach a model provider: a new session runs instead of stopping on a
-missing API key.
-
-**Do this.**
-
-```sh
-open "/Applications/T3 Code (Alpha).app"
-```
-
-In the app's settings, add an API key for at least one provider. T3 Code is an alpha GUI control
-plane rather than a CLI, so there is no flag for this and no file in this repo to edit.
-
-Leave the keys in the app. If you also need them in your shell, they belong in a file of your own
-that your shell sources — outside this repo, `chmod 600` — and never in a file this repo tracks.
-
-**Verify.** Start a session in the app. It responds, rather than reporting a missing or invalid API
-key. This is a GUI check; there is nothing to run in a terminal.
-
-**Undo.** Remove the keys in the same settings pane, and revoke them at the provider if they were
-issued for this machine alone.
-
-**Why it works this way.** T3 Code ships through Homebrew but configures itself interactively, so it
-is documented here rather than managed — see
-[Agent tooling and installation](agent-tooling.md#specific-tools-deliberately-handled-differently).
-
----
-
-## 4. Herdr notifications
+## 3. Herdr notifications
 
 **What you get.** A macOS notification when an agent in any Herdr pane finishes or needs input,
 carrying your terminal's icon, with a click that raises the terminal and `prefix+g` that jumps to
-the pane behind it. Step 5 is what makes it stay on screen.
+the pane behind it. Step 4 is what makes it stay on screen.
 
 **Do this.** Three parts. First, Herdr's own configuration:
 
@@ -369,8 +340,8 @@ Then the live test, which needs the Herdr server running:
 herdr notification show "test" --body "hello" --sound done
 ```
 
-A notification appears carrying your terminal's icon; until step 5 is done it leaves again after a
-few seconds. If nothing appears at all, do step 5. If the icon is a script or scroll and clicking it
+A notification appears carrying your terminal's icon; until step 4 is done it leaves again after a
+few seconds. If nothing appears at all, do step 4. If the icon is a script or scroll and clicking it
 opens Finder, `terminal-notifier` is missing — go back to step 1.
 
 **Undo.**
@@ -390,9 +361,9 @@ never reaches the terminal and `delivery = "system"` is what replaces it — see
 
 ---
 
-## 5. Allow notifications and make them stay on screen
+## 4. Allow notifications and make them stay on screen
 
-**What you get.** The notifications from step 4 actually appear, and they stay on screen until you
+**What you get.** The notifications from step 3 actually appear, and they stay on screen until you
 dismiss them instead of leaving after a few seconds. Until the first toggle is on, everything is
 configured correctly and nothing shows up; until the second, a banner shows and is gone before you
 look up. Both are the most confusing failures in this guide.
@@ -408,7 +379,7 @@ Find **terminal-notifier** in the application list, turn **Allow Notifications**
 **Ghostty**, which is the sender on the days you run an agent outside Herdr.
 
 An entry only appears once the app has tried to notify at least once. If `terminal-notifier` is
-missing, run the live test from step 4 and look again; if Ghostty is missing, run this in a Ghostty
+missing, run the live test from step 3 and look again; if Ghostty is missing, run this in a Ghostty
 pane that is not inside Herdr, switch to another app for a moment, and look again:
 
 ```sh
@@ -444,7 +415,7 @@ installer sets it — see
 
 ---
 
-## 6. Known collisions to check
+## 5. Known collisions to check
 
 Conditional. Do each of these only if its check fires. `setup.sh` detects the first and warns;
 neither touches a file this repo manages, which is why neither is fixed for you.
@@ -501,7 +472,7 @@ them instead of acting — see
 
 ---
 
-## 7. Yazi icons in Zed's terminal
+## 6. Yazi icons in Zed's terminal
 
 **What you get.** Yazi's file icons and git status signs rendered in Zed's built-in terminal.
 Ghostty needs nothing: it ships the Nerd Font symbols and falls back to them on its own. Zed has
@@ -530,7 +501,7 @@ an installer step — see
 
 ---
 
-## 8. Run containers with Colima
+## 7. Run containers with Colima
 
 **What you get.** `docker`, `docker compose` and `docker buildx` working against Colima's Linux VM,
 sized for several Compose stacks at once, with file watchers inside containers seeing the edits
@@ -623,12 +594,11 @@ The rest stays, and stays here:
 |---|---|
 | [1. Install the tools and place configs](#1-install-the-tools-and-place-configs) | the two-script split: `setup.sh` needs the network, `install.sh` may not |
 | [2. Install and authenticate the coding agents](#2-install-and-authenticate-the-coding-agents) | interactive OAuth; nothing types a password into a browser for you |
-| [3. Configure T3 Code](#3-configure-t3-code) | provider API keys are secrets, and this repo ships none |
-| [4. Herdr notifications](#4-herdr-notifications) | Herdr has no include mechanism; agent settings unmanaged per ADR 0005 |
-| [5. Allow notifications and make them stay on screen](#5-allow-notifications-and-make-them-stay-on-screen) | two GUI toggles only you can flip |
-| [6. Known collisions to check](#6-known-collisions-to-check) | detection is automatable; the remedy edits files this repo does not manage |
-| [7. Yazi icons in Zed's terminal](#7-yazi-icons-in-zeds-terminal) | Zed's settings are unmanaged per ADR 0005 |
-| [8. Run containers with Colima](#8-run-containers-with-colima) | the VM's size is a choice per machine; Colima's config is unmanaged per ADR 0005, and `config.json` is Docker's own |
+| [3. Herdr notifications](#3-herdr-notifications) | Herdr has no include mechanism; agent settings unmanaged per ADR 0005 |
+| [4. Allow notifications and make them stay on screen](#4-allow-notifications-and-make-them-stay-on-screen) | two GUI toggles only you can flip |
+| [5. Known collisions to check](#5-known-collisions-to-check) | detection is automatable; the remedy edits files this repo does not manage |
+| [6. Yazi icons in Zed's terminal](#6-yazi-icons-in-zeds-terminal) | Zed's settings are unmanaged per ADR 0005 |
+| [7. Run containers with Colima](#7-run-containers-with-colima) | the VM's size is a choice per machine; Colima's config is unmanaged per ADR 0005, and `config.json` is Docker's own |
 
 One rule outlives the prune: **a command that writes to `$HOME` appears exactly once in this
 repository.** If a procedure ever comes back out of `install.sh`, it comes back to this file — not
