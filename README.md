@@ -29,7 +29,8 @@ docs/assets/hero.png and replace this comment with:
 - **"Your agent finished" notifications that survive a multiplexer** — one setting that reaches
   Claude Code in Ghostty, in [Herdr](https://herdr.dev) and in Zed's Terminal Threads.
 - **One command for the tools** — a `Brewfile` covering Ghostty, Zed, Herdr, Yazi, hunk, micro,
-  Leaf, the GitHub CLI and four coding-agent CLIs, and a `setup.sh` that installs it convergently.
+  Leaf, the GitHub CLI, Colima with the Docker CLI, and four coding-agent CLIs, and a `setup.sh`
+  that installs it convergently.
 - **Nothing installed over your own configuration.** Every managed file is reached through the
   tool's own include mechanism, your existing settings are preserved byte for byte, and your git
   identity is never touched.
@@ -93,6 +94,7 @@ to the projects.
 | [Claude Code](https://claude.ai/code) | Anthropic's agent CLI. Installed by its own installer, deliberately not through Homebrew. |
 | [Codex](https://github.com/openai/codex), [Copilot CLI](https://docs.github.com/en/copilot/concepts/agents/about-copilot-cli), [Antigravity CLI](https://antigravity.google/product/antigravity-cli) (`agy`), [Grok Build](https://x.ai/build) | The other agent CLIs, all from the `Brewfile`. |
 | [GitHub CLI](https://cli.github.com) | Feeds a pull request into hunk for review. |
+| [Colima](https://colima.run) | Docker's engine in a Lima VM, driven by the `docker` CLI with Compose and Buildx — no Docker Desktop. Installed and started by hand; not configured here. |
 
 ## Platform
 
@@ -202,10 +204,10 @@ The split exists so that config placement never depends on the network and stays
 half-broken machine.
 
 `setup.sh` installs the daily tools via Homebrew (Ghostty, micro, hunk, Yazi and Leaf with the
-tools Yazi previews through, Zed, T3 Code, Herdr, and coding agent CLIs), restores Yazi's plugins
-from the tracked lockfile, and configures Herdr agent integrations. Re-running it is safe and
-convergent. An app installed by hand before is left alone and reported; `./setup.sh --adopt`
-hands it to Homebrew, after explaining the macOS permission prompt that needs.
+tools Yazi previews through, Zed, T3 Code, Herdr, Colima with the Docker CLI, and coding agent
+CLIs), restores Yazi's plugins from the tracked lockfile, and configures Herdr agent integrations.
+Re-running it is safe and convergent. An app installed by hand before is left alone and reported;
+`./setup.sh --adopt` hands it to Homebrew, after explaining the macOS permission prompt that needs.
 
 `install.sh` places configuration stubs using native include directives and named delimited blocks,
 and copies the one config whose tool offers no include mechanism at all. It supports two
@@ -257,6 +259,10 @@ manual — see [Manual setup](docs/manual-setup.md).
   client in a pane beside a running agent, why this one config is copied instead of included, the
   TOML rule that makes a shared block impossible, and the git alias trap that makes a relative
   pathspec vanish.
+- [Colima](docs/colima.md) — Docker without Docker Desktop: the `colima start` flags that matter
+  on Apple silicon, how to size the VM's CPUs, memory and disk for several Compose stacks running
+  at once, and four traps — file watchers that never fire, JVMs that size themselves from the
+  whole VM, a disk that only grows, and a Docker context Colima takes over.
 - [Yazi](docs/yazi.md) — a terminal file manager that opens files in micro, reads Markdown in
   Leaf with micro one menu away, renders Markdown in its preview pane, and marks git status next
   to every file. Also: why its config is delivered through `YAZI_CONFIG_HOME` in `~/.zshenv`

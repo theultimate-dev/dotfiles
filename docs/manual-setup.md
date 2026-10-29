@@ -15,7 +15,7 @@ expands it for you.
 macOS only. Git push defaults additionally need **git 2.37 or newer** — check with `git --version`,
 because on older git the settings `install.sh` activates are silently inert.
 
-**What gets written.** Four files outside this repo by hand, and nothing else. No step creates a
+**What gets written.** Five files outside this repo by hand, and nothing else. No step creates a
 symlink, and no step overwrites a file wholesale:
 
 | Path | Step | Action | Present today? |
@@ -24,14 +24,16 @@ symlink, and no step overwrites a file wholesale:
 | `~/.claude/settings.json` | 4 | one key added | present if Claude Code is installed |
 | `~/.grok/config.toml` | 6 | edited only if the collision fires | conditional |
 | `~/.config/zed/settings.json` | 7 | one key added | present if Zed has been run |
+| `~/.docker/config.json` | 8 | one key added; Colima then sets the current context, defined in `~/.docker/contexts/` | absent until Docker or Colima first runs |
 
 `install.sh` in step 1 additionally writes three managed blocks — the include stubs
 `~/.config/git/config` and `~/.config/ghostty/config.ghostty`, and an `export` of `YAZI_CONFIG_HOME`
 in `~/.zshenv` — and one whole file, `~/.config/hunk/config.toml`, which it owns outright because
 hunk has no include mechanism to hook into. It takes its own backups before touching any of them.
 Steps 1 to 3 also install software and write credentials, but only into each tool's own
-configuration directory. Steps 2, 3 and 5 are interactive — a browser login, a settings pane — and
-have no terminal equivalent.
+configuration directory, and step 8 creates Colima's VM in Colima's own `~/.colima` and caches its
+image in `~/Library/Caches/colima`. Steps 2, 3 and 5 are interactive — a browser login, a settings
+pane — and have no terminal equivalent.
 
 **Snapshot.** Do this once, before step 1. It is the difference between "I changed something" and
 "I can put it back":
@@ -41,7 +43,7 @@ mkdir -p ~/.dotfiles-backup
 
 for f in ~/.config/herdr/config.toml ~/.claude/settings.json ~/.grok/config.toml \
          ~/.config/ghostty/config.ghostty ~/.zshenv ~/.config/zed/settings.json \
-         ~/.config/hunk/config.toml; do
+         ~/.config/hunk/config.toml ~/.docker/config.json; do
   if [ -e "$f" ]; then
     cp -p "$f" ~/.dotfiles-backup/"$(printf '%s' "${f#$HOME/.}" | tr / -)"
     echo "saved:  $f"
@@ -73,24 +75,24 @@ known-good state than from a half-applied one.
 the file outright if the loop above reported it absent. Each step below names its own.
 
 **Order.** Steps 1 to 3 run in sequence — you cannot log in to a tool that is not installed yet.
-Steps 4 to 7 are independent of each other and of the first three: run them in any order, or skip
-the ones you do not want. (Steps 4, 6 and 7 configure tools that step 1 installs; if you skipped
-step 1 there is simply nothing there to configure.)
+Steps 4 to 8 are independent of each other and of the first three: run them in any order, or skip
+the ones you do not want. (Steps 4, 6, 7 and 8 configure tools that step 1 installs; if you
+skipped step 1 there is simply nothing there to configure.)
 
 ---
 
 ## 1. Install the tools and place configs
 
 **What you get.** Homebrew plus every tool the rest of this guide configures — Ghostty, Zed, Herdr,
-T3 Code, `terminal-notifier`, Yazi with Leaf and the tools its previews run through, and the
-coding agent CLIs — installed and on `$PATH`, with Herdr's session-identity integration registered
-for each agent whose config directory already exists, Yazi's two plugins restored from the
-tracked lockfile, and the git and Ghostty include stubs plus the `YAZI_CONFIG_HOME` export in
-`~/.zshenv` placed atomically via `./install.sh`. Open a new shell afterwards, or run
-`source ~/.zshenv; rehash` in this one: `~/.zshenv` is read at shell start, so a Yazi started from
-the shell that ran the installer does not see the export, and inside this repo that same shell's
-stale command hash plus zsh's `auto_cd` turn a bare `yazi` into `cd yazi/` — see
-[the trap](yazi.md#trap-the-shell-you-installed-from).
+T3 Code, `terminal-notifier`, Yazi with Leaf and the tools its previews run through, Colima with
+the Docker CLI and its Compose and Buildx plugins, and the coding agent CLIs — installed and on
+`$PATH`, with Herdr's session-identity integration registered for each agent whose config directory
+already exists, Yazi's two plugins restored from the tracked lockfile, and the git and Ghostty
+include stubs plus the `YAZI_CONFIG_HOME` export in `~/.zshenv` placed atomically via
+`./install.sh`. Open a new shell afterwards, or run `source ~/.zshenv; rehash` in this one:
+`~/.zshenv` is read at shell start, so a Yazi started from the shell that ran the installer does
+not see the export, and inside this repo that same shell's stale command hash plus zsh's `auto_cd`
+turn a bare `yazi` into `cd yazi/` — see [the trap](yazi.md#trap-the-shell-you-installed-from).
 
 **Do this.**
 
@@ -528,6 +530,77 @@ an installer step — see
 
 ---
 
+## 8. Run containers with Colima
+
+**What you get.** `docker`, `docker compose` and `docker buildx` working against Colima's Linux VM,
+sized for several Compose stacks at once, with file watchers inside containers seeing the edits
+you make on the Mac. The VM runs only while you have started it.
+
+**Do this.** First, tell Docker where Homebrew put the Compose and Buildx plugins. This adds one
+key to `~/.docker/config.json`, creating the file if it is absent and keeping everything else in
+it. Re-running it changes nothing:
+
+```sh
+mkdir -p ~/.docker
+cfg=~/.docker/config.json
+{ cat "$cfg" 2>/dev/null || echo '{}'; } |
+  jq --arg dir "$(brew --prefix)/lib/docker/cli-plugins" \
+    '.cliPluginsExtraDirs = ((.cliPluginsExtraDirs // []) - [$dir] + [$dir])' > "$cfg.tmp" &&
+  chmod 600 "$cfg.tmp" && mv "$cfg.tmp" "$cfg"
+```
+
+Then create and start the VM. These numbers fit an Apple silicon Mac with 10 cores and 32 GiB
+running three or four web stacks at once. Work out your own from
+[Sizing the VM](colima.md#sizing-the-vm-for-several-stacks-at-once) **before the first start**: the
+disk can only grow, and the VM type is fixed once the VM exists.
+
+```sh
+colima start --vm-type vz --mount-type virtiofs --mount-inotify \
+  --cpus 8 --memory 12 --disk 150 --ssh-config=false
+```
+
+The first start downloads the VM image. Colima saves these flags, so from then on a bare
+`colima start` and `colima stop` are all you type. To change the CPUs or the memory, stop the VM
+and start it again with only the new value:
+
+```sh
+colima stop
+colima start --memory 16
+```
+
+**Verify.**
+
+```sh
+docker context ls
+docker compose version
+docker buildx version
+docker run --rm hello-world
+```
+
+`colima` is the context marked current with `*`, both plugins print a version, and `hello-world`
+prints `Hello from Docker!`. Then, in any project whose containers run a file watcher over a bind
+mount, save a real change to a watched file on the Mac and watch `docker compose logs -f` show the
+reload. A bare `touch` is not enough: it does not trigger the watcher, even with the flag on.
+
+**Undo.** Delete the VM. This deletes every image, container and volume inside it, along with the
+`colima` Docker context, and asks first. Then remove what it leaves behind: Colima's shared state
+and the cached VM image. Skip the second line if you keep other Colima profiles.
+
+```sh
+colima delete
+rm -rf ~/.colima ~/Library/Caches/colima
+```
+
+Then restore `~/.dotfiles-backup/docker-config.json`, or delete `~/.docker/config.json` if the
+snapshot loop reported it absent. The packages themselves go with step 1's undo.
+
+**Why it works this way.** Colima rewrites its own config on every start that passes flags, so it
+stays unmanaged, as [ADR 0005](decisions/0005-install-agent-tooling-without-managing-its-config.md)
+leaves other self-rewriting configs. The plugin directory is listed rather than symlinked. See
+[Colima](colima.md) for every flag, the sizing, and the traps.
+
+---
+
 ## What the installer has taken over
 
 `install.sh` has landed. It automates Git push defaults by writing the `[include]` into
@@ -555,6 +628,7 @@ The rest stays, and stays here:
 | [5. Allow notifications and make them stay on screen](#5-allow-notifications-and-make-them-stay-on-screen) | two GUI toggles only you can flip |
 | [6. Known collisions to check](#6-known-collisions-to-check) | detection is automatable; the remedy edits files this repo does not manage |
 | [7. Yazi icons in Zed's terminal](#7-yazi-icons-in-zeds-terminal) | Zed's settings are unmanaged per ADR 0005 |
+| [8. Run containers with Colima](#8-run-containers-with-colima) | the VM's size is a choice per machine; Colima's config is unmanaged per ADR 0005, and `config.json` is Docker's own |
 
 One rule outlives the prune: **a command that writes to `$HOME` appears exactly once in this
 repository.** If a procedure ever comes back out of `install.sh`, it comes back to this file — not
