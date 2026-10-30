@@ -10,9 +10,9 @@ install it whole: the installer, the tool list, and the configuration for each t
 reasoning written down next to every choice that was not obvious.
 
 **Current state:** the installer, the git defaults, the Ghostty configuration, the Yazi
-configuration and the hunk configuration are in; the shell configuration and the runtime versions
-follow. The delivery model below is not aspirational — it is in daily use, and it is binding for
-every file that lands here.
+configuration, the hunk configuration and the Herdr configuration are in; the shell configuration
+and the runtime versions follow. The delivery model below is not aspirational — it is in daily
+use, and it is binding for every file that lands here.
 
 **macOS only.** It is the only platform anything here is developed or tested on. Do not add Linux
 or WSL branches to make something "portable"; untested portability is worse than a documented
@@ -63,6 +63,12 @@ Planned, not yet delivered — listed so the mechanism is decided before the por
 | `~/.zshrc` | `source <repo>/zsh/.zshrc` |
 | `~/.tool-versions` | byte copy — asdf has no include mechanism |
 | `scripts/` | `<repo>/scripts` prepended to `$PATH`; no file installed |
+
+One tracked configuration is deliberately absent from both tables: `herdr/`. Herdr's config file is
+also written by Herdr and by its herdr-radar plugin, so no script here writes it; a person or an
+agent copies or merges it by following `docs/manual-setup.md` step 3. See
+[ADR 0013](docs/decisions/0013-apply-the-herdr-config-by-hand.md). `setup.sh` installs the pinned
+Herdr plugins through Herdr's own CLI, the way it installs Herdr's agent integrations.
 
 This keeps the one property that made symlinks attractive — **the repo is the live source of truth,
 edits take effect with no reinstall, and `git diff` audits the whole configuration** — without the
@@ -135,6 +141,7 @@ only when it does not.
 | **Ghostty** | the **repo** — `config-file` is processed at the *end* of the containing file | `~/.config/ghostty/local.ghostty` |
 | **Yazi** | the **repo** — it is the only directory Yazi reads | none; a different `YAZI_CONFIG_HOME` exported below the block in `~/.zshenv` |
 | **hunk** | the **repo** — the installer owns the destination outright | none machine-wide; a per-project `.hunk/config.toml` overrides it for one repository |
+| **Herdr** | the **machine** — the repo's file is applied by hand, and nothing re-applies it | `~/.config/herdr/config.toml` itself; keep what the repo lacks there when you merge |
 | **zsh** *(planned)* | **local** — later lines win | a local file sourced last; the file name is decided with the port |
 
 Practical consequence: `git config --global …` writes into `~/.gitconfig`, not into this repo, and
@@ -234,7 +241,8 @@ Format is `type(scope): description`, per
 
 - **Descriptions are past tense** — `feat(zsh): added a notification for long-running commands`.
 - **Scope is optional but preferred**, naming the top-level directory or subject: `install`,
-  `setup`, `zsh`, `git`, `ghostty`, `yazi`, `hunk`, `scripts`, `brew`, `asdf`, `docs`, `claude`.
+  `setup`, `zsh`, `git`, `ghostty`, `yazi`, `hunk`, `herdr`, `scripts`, `brew`, `asdf`, `docs`,
+  `claude`.
 - **One self-contained unit of work per commit.** Unrelated changes get their own commits; when the
   working tree mixes them, split rather than bundle.
 - **Breaking changes** — anything in the MAJOR row above — take a `!` after the type or scope *and*

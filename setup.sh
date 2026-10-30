@@ -205,6 +205,47 @@ else
   warn "herdr not found on PATH — skipping integrations"
 fi
 
+# ── Herdr plugins ────────────────────────────────────────────────────────
+step "Herdr plugins"
+# Each plugin is pinned in herdr/plugins.txt to a tag and the commit it points
+# at. One already installed at that commit is left alone; anything else is
+# installed, or reinstalled, at the tag. A running Herdr keeps the old version
+# of a plugin until it restarts. See docs/agent-tooling.md, "Herdr plugins".
+#
+# The commit comes from the JSON listing. The plain `herdr plugin list` shows
+# the ref an install asked for, so a plugin installed at a tag reads as
+# `@v1.5.0` there and never matches a commit. The list is read on fd 3 so that
+# herdr cannot consume the loop's input.
+if command -v herdr >/dev/null 2>&1; then
+  command -v node >/dev/null 2>&1 \
+    || warn "node not found on PATH. The pinned Herdr plugins run on Node 18 or newer."
+
+  while read -r id source tag commit <&3; do
+    case "$id" in ''|'#'*) continue ;; esac
+
+    PLUGIN_JSON="$(herdr plugin list --plugin "$id" --json 2>/dev/null || true)"
+    case "$PLUGIN_JSON" in
+      *"\"resolved_commit\":\"$commit\""*)
+        echo "$id: already at $tag"
+        continue
+        ;;
+    esac
+
+    echo "$id: installing $source@$tag"
+    if ! herdr plugin install --yes --ref "$tag" "$source"; then
+      warn "failed to install plugin: $id"
+      continue
+    fi
+    PLUGIN_JSON="$(herdr plugin list --plugin "$id" --json 2>/dev/null || true)"
+    case "$PLUGIN_JSON" in
+      *"\"resolved_commit\":\"$commit\""*) ;;
+      *) warn "$id: $tag no longer points at the pinned commit; check upstream first" ;;
+    esac
+  done 3< "$DOTFILES/herdr/plugins.txt"
+else
+  warn "herdr not found on PATH — skipping plugins"
+fi
+
 # ── Post-install notes ────────────────────────────────────────────────────
 step "Post-install notes"
 # The steps themselves are not listed here. They live in one file, with a check and

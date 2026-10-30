@@ -1,0 +1,64 @@
+# herdr-radar settings — The Ultimate Dev / dotfiles (public).
+#
+# herdr-radar turns Herdr's sidebar into a readable list of agents: who is
+# working, who is waiting on you, who went quiet. This is the source for
+# $(herdr plugin config-dir hhdebb.herdr-radar)/config.toml, which is
+# ~/.config/herdr/plugins/config/hhdebb.herdr-radar/config.toml. Like
+# ../../config.toml, no script places it: step 3 of docs/manual-setup.md copies
+# it onto a Mac that has none and merges it into one that has. See
+# docs/decisions/0013-apply-the-herdr-config-by-hand.md.
+#
+# Every value below is the plugin's own default as of 1.5.0, written out so a
+# change of mind shows up as a diff. Two keys are left out on purpose:
+# multi_machine and machine_label name the host, which a shared file must not.
+#
+# Three things about this file that are not ordinary TOML:
+# - The plugin reads it with its own small parser, which has no escapes: a
+#   glyph has to be the literal character, never "".
+# - Its settings popup (prefix+comma) rewrites every key line present, so a
+#   comment at the end of a key line is lost. Comments go on their own lines.
+# - "Reset to default" in the popup leaves the old line in place.
+#
+# Tested with herdr-radar 1.5.0.
+
+# Herdr's workspace numbers follow Radar's activity order.
+reorder_workspaces = false
+
+# Vendor logos from the icon font, plain Unicode, or none.
+variant = "auto"
+
+# How long the done tick stays: until you focus the pane, or 6/15/30/60/120 s.
+done_hold = "until_seen"
+
+# Keep the question mark until the agent works again.
+blocked_hold = true
+
+# Idle must last this long before a turn counts as ended.
+idle_grace_seconds = 2.5
+
+# An idle pane reads as fresh this long after its last turn, and fades to stale
+# after the second value.
+activity_fresh_minutes = 15
+activity_stale_minutes = 120
+
+# Indent under a workspace header (0 = flat), and a blank row between groups.
+group_indent = 2
+group_gap = true
+
+# Hang the other panes of a split screen off the first with a corner.
+split_corner = false
+
+# What names an agent row: "title", "tab" or "both".
+row_label = "title"
+
+# Drop the workspace name from a title when the header above already shows it.
+trim_group_prefix = true
+
+# Follow the desktop's light/dark and switch Herdr's theme with it.
+follow_appearance = true
+
+# Selected-row fill the plugin writes into Herdr's [theme.custom]; "" keeps the
+# theme's own.
+[colors]
+active_row_bg_light = "#b9cdf2"
+active_row_bg_dark = "#414868"

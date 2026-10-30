@@ -58,7 +58,7 @@ docs/assets/hero.png and replace this comment with:
    cd dotfiles
    ```
 
-2. **Install the tools** (Homebrew, casks, agent CLIs, Herdr integrations):
+2. **Install the tools** (Homebrew, casks, agent CLIs, Herdr integrations and plugins):
    ```sh
    ./setup.sh
    ```
@@ -73,8 +73,8 @@ toggle cannot be scripted; [Manual setup](docs/manual-setup.md) walks through th
 with a check and an undo.
 
 > **Status:** this repo is being built in the open. Tool installation, git defaults, and the
-> Ghostty, Yazi and hunk configurations are live; the shell configuration and runtime versions
-> follow. [`CHANGELOG.md`](CHANGELOG.md) tracks what has arrived.
+> Ghostty, Yazi, hunk and Herdr configurations are live; the shell configuration and runtime
+> versions follow. [`CHANGELOG.md`](CHANGELOG.md) tracks what has arrived.
 
 ## The tools
 
@@ -84,7 +84,7 @@ to the projects.
 | Tool | What it is here |
 |---|---|
 | [Ghostty](https://ghostty.org) | The terminal. Managed config; machine-local overrides in `local.ghostty`. |
-| [Herdr](https://herdr.dev) | A terminal multiplexer built for running coding agents in panes. Installed, not configured here. |
+| [Herdr](https://herdr.dev) | A terminal multiplexer built for running coding agents in panes. Config and the pinned [herdr-radar](https://github.com/hhdebb/herdr-radar) sidebar plugin kept in `herdr/`; applied by hand or by an agent, never by a script. |
 | [Yazi](https://yazi-rs.github.io) | Terminal file manager. Managed config, reached through `YAZI_CONFIG_HOME`. |
 | [hunk](https://hunk.dev) | Read-only diff viewer with a live watch mode. Managed config, copied. |
 | [micro](https://micro-editor.github.io) | Terminal editor for quick edits beside a running agent. |
@@ -113,6 +113,7 @@ an account stays on your machine, untracked, and the docs say where.
 | **terminal** | the Ghostty configuration | machine-specific display and font tweaks, in `local.ghostty` |
 | **files** | the Yazi configuration: openers, Markdown preview, git status marks | nothing — Yazi reads one directory, so there is no local layer |
 | **review** | the hunk configuration | a per-project `.hunk/config.toml`, if a repository needs one |
+| **multiplexer** | the Herdr configuration, its pinned plugin and the plugin's settings — applied by hand | whatever Herdr's settings panel saves, and the blocks herdr-radar writes into Herdr's config |
 | **shell** *(planned)* | the zsh configuration | secrets, tokens, anything host-specific |
 
 The git line is the one worth stating outright: **this repo will never contain a `[user]`
@@ -204,7 +205,8 @@ half-broken machine.
 
 `setup.sh` installs the daily tools via Homebrew (Ghostty, micro, hunk, Yazi and Leaf with the
 tools Yazi previews through, Zed, Herdr, Colima with the Docker CLI, and coding agent CLIs),
-restores Yazi's plugins from the tracked lockfile, and configures Herdr agent integrations.
+restores Yazi's plugins from the tracked lockfile, configures Herdr agent integrations, and
+installs the Herdr plugins pinned in `herdr/plugins.txt`.
 Re-running it is safe and convergent. An app installed by hand before is left alone and reported;
 `./setup.sh --adopt` hands it to Homebrew, after explaining the macOS permission prompt that needs.
 
@@ -226,12 +228,14 @@ manual — see [Manual setup](docs/manual-setup.md).
 | [`CLAUDE.md`](CLAUDE.md) | Claude Code guidance; imports `AGENTS.md` |
 | [`CHANGELOG.md`](CHANGELOG.md) | Every notable change, newest first |
 | [`Brewfile`](Brewfile) | Declarative package list installed via Homebrew |
-| [`setup.sh`](setup.sh) | Tool installation and Herdr agent integration script |
+| [`setup.sh`](setup.sh) | Tool installation script, including Herdr's agent integrations and pinned plugins |
 | [`install.sh`](install.sh) | Configuration placement script (atomic writes, no symlinks) |
 | `git/` | Managed git configuration |
 | `ghostty/` | Managed Ghostty configuration |
 | `yazi/` | Managed Yazi configuration; `plugins/` inside it is restored by `setup.sh` and untracked |
 | `hunk/` | Managed hunk configuration; copied to its destination rather than included |
+| `herdr/` | Herdr configuration, plugin pins and plugin settings; applied by hand — [manual setup, step 3](docs/manual-setup.md#3-configure-herdr) |
+| [`renovate.json`](renovate.json) | Renovate, limited to bumping the Herdr plugin pins; Dependabot keeps the GitHub Actions |
 | [`LICENSE`](LICENSE) | MIT — see [Licence and scope](#licence-and-scope) |
 | `docs/` | Deep dives on the pieces whose reasoning is not obvious from the code |
 | [`docs/decisions/`](docs/decisions/README.md) | Architecture decision records, with an index — why a choice was made, and what was rejected |
@@ -250,8 +254,8 @@ manual — see [Manual setup](docs/manual-setup.md).
   [0010](docs/decisions/0010-export-a-config-directory-variable-from-zshenv.md) for the one tool
   reached through an environment variable instead of a stub.
 - [Agent tooling & installation](docs/agent-tooling.md) — why Homebrew is used for all daily tools,
-  how `auto_updates` casks behave, the Herdr integration lifecycle, and how to avoid installer traps
-  when juggling multiple coding agents on macOS.
+  how `auto_updates` casks behave, the Herdr integration lifecycle and plugin pins, and how to avoid
+  installer traps when juggling multiple coding agents on macOS.
 - [hunk](docs/hunk.md) — a live diff pane for watching a coding agent edit the working tree as it
   happens, rather than reading the whole changeset afterwards, plus how to review a commit, a
   branch or a GitHub pull request with the same viewer. Also: why a read-only viewer beats a git

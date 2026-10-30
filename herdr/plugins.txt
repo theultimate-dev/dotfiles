@@ -1,0 +1,7 @@
+# Herdr plugins setup.sh installs, each pinned to a release tag and the commit
+# that tag points at. setup.sh installs at the tag and warns when the tag has
+# moved off the commit. Renovate opens a PR when a newer tag appears and bumps
+# both fields together (renovate.json at the repository root).
+#
+# <plugin id> <owner/repo> <tag> <commit>
+hhdebb.herdr-radar hhdebb/herdr-radar v1.5.0 79a81bbddc017a4349713e282b1a01ee360c46de

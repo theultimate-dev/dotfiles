@@ -128,7 +128,8 @@ default (unless `--no-upgrade` or `HOMEBREW_BUNDLE_NO_UPGRADE` is set).
 
 Therefore, running `setup.sh` again on an existing installation is **convergent, not inert**. It
 ensures new tools added to `Brewfile` are pulled down, verifies that Herdr integrations remain
-current, and reports any application it finds installed outside Homebrew — see
+current, moves Herdr plugins to the versions pinned in the repo, and reports any application it
+finds installed outside Homebrew — see
 [Apps you installed before Homebrew did](#apps-you-installed-before-homebrew-did).
 
 ---
@@ -175,6 +176,54 @@ It is vital to understand what these integrations provide and what they do not:
 - **No background service side-effect:** `setup.sh` does not run `brew services start herdr`.
   Herdr spawns its own server on invocation; running launchd daemons behind the scenes is an
   unwanted side-effect for an installation script.
+
+### Herdr plugins
+
+`setup.sh` also installs the Herdr plugins pinned in [`herdr/plugins.txt`](../herdr/plugins.txt):
+one per line, as plugin id, GitHub source, release tag, and the commit that tag points at.
+
+```text
+hhdebb.herdr-radar hhdebb/herdr-radar v1.5.0 79a81bbddc017a4349713e282b1a01ee360c46de
+```
+
+The one there today is [herdr-radar](https://github.com/hhdebb/herdr-radar), which turns Herdr's
+sidebar into a list you can read at a glance: who is working, who is waiting on you, who went
+quiet. Its own settings are tracked in `herdr/plugins/hhdebb.herdr-radar/config.toml`. That file
+and [`herdr/config.toml`](../herdr/config.toml) reach a Mac by hand or through a coding agent, never
+through a script — see [step 3 of the manual setup](manual-setup.md#3-configure-herdr), and
+[ADR 0013](decisions/0013-apply-the-herdr-config-by-hand.md) for why.
+
+- **Converging on the pin:** a plugin that `herdr plugin list` already shows at the pinned commit is
+  left alone, enabled or not. Anything else is installed with `herdr plugin install --yes --ref
+  <tag>`, and `setup.sh` warns when the tag now resolves to a different commit. A tag that moved
+  after it was pinned is worth a look before you trust it.
+- **Bumps:** [Renovate](https://docs.renovatebot.com) opens a pull request when a pinned plugin
+  publishes a newer tag, changing the tag and the commit together. `renovate.json` limits it to
+  this one file; Dependabot keeps the GitHub Actions, and cannot take this over, because it reads
+  package manifests rather than a pin in a plain file. A plugin upgrade is user-facing, so the pull
+  request needs a `CHANGELOG.md` entry before it is merged. To bump by hand, take both values from
+  `git ls-remote --tags https://github.com/<owner>/<repo>`; for an annotated tag the commit is the
+  one on the `^{}` line, not the tag object above it.
+- **A running Herdr keeps the old version** of a plugin until Herdr restarts. herdr-radar can
+  switch without ending anything running in your panes: its `state-restart` action restarts only
+  its own process, the way part three of [step 3](manual-setup.md#3-configure-herdr) runs it.
+- **Node, not Python:** the pinned plugins run on Node 18 or newer, which this repository does not
+  install yet. `setup.sh` warns when `node` is missing from `PATH`.
+
+**herdr-radar fails silently without a bare `[ui]` table.** On its first start it writes three
+marker-fenced blocks into `~/.config/herdr/config.toml`: the tab bar, the theme, and the sidebar
+rows. If that file has no `[ui]` header line, it refuses, says so in a notification that is easy
+to miss, and still records its first-run setup as done. No later start retries, so the sidebar
+stays Herdr's own and nothing says why. [`herdr/config.toml`](../herdr/config.toml) carries the
+`[ui]` line; with it in place, the plugin's `configure` action writes the blocks, which part three
+of [step 3](manual-setup.md#3-configure-herdr) runs once for exactly this reason.
+
+**What herdr-radar writes outside Herdr's own directories:** its icon font, into
+`~/Library/Fonts`, and a `# >>> herdr-radar font block` of `font-codepoint-map` lines appended to
+`~/.config/ghostty/config.ghostty`. That is the stub `install.sh` writes, and the plugin's block
+sits below the installer's own; the two coexist, and `./install.sh --check` still passes. Because
+the stub is a real file and not a symlink, the block lands on your machine and never in this
+repository.
 
 ---
 

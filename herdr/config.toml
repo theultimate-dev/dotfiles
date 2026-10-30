@@ -1,0 +1,79 @@
+# Herdr configuration — The Ultimate Dev / dotfiles (public).
+#
+# Herdr is the multiplexer the coding agents run in. This file is the source for
+# ~/.config/herdr/config.toml. herdr-radar, the plugin pinned in plugins.txt
+# beside this file, shares that destination; its own settings live in
+# plugins/hhdebb.herdr-radar/config.toml.
+#
+# Delivery, the part that bites: no script places this file. You apply it, or
+# hand that to a coding agent, by following step 3 of docs/manual-setup.md: a
+# copy on a Mac with no Herdr config yet, a merge into one that has. Herdr has
+# no include directive, and the destination has other writers — Herdr itself
+# (onboarding, its settings panel) and herdr-radar, which keeps three
+# marker-fenced blocks there and rewrites [theme] name and auto_switch as the
+# desktop turns light or dark. HERDR_CONFIG_PATH could point Herdr at this file,
+# but herdr-radar ignores that variable and would go on writing to
+# ~/.config/herdr/config.toml, a file Herdr would then no longer read.
+# See docs/decisions/0013-apply-the-herdr-config-by-hand.md.
+#
+# Rules for this file, all set by herdr-radar (its lib/managed-config.js):
+# - Keep the bare [ui] header line below. The plugin inserts its tab-bar block
+#   directly under it, and without it refuses to configure itself at all.
+# - Never set tab_bar_right or tab_bar_right_separator; that block owns both.
+# - Never define [theme.custom], [ui.sidebar.agents],
+#   [ui.sidebar.agents.rows_by_agent] or [ui.sidebar.spaces]. A table defined
+#   here makes the plugin drop its own block for it, silently.
+# - Never copy the destination back into this file: the plugin's tab-bar block
+#   holds an absolute path into your home directory.
+#
+# Validate an edit without touching your machine:
+#   HERDR_CONFIG_PATH="$PWD/herdr/config.toml" herdr config check
+#
+# Tested with Herdr 0.9.5 and herdr-radar 1.5.0.
+
+# setup.sh installs the agent integrations the first-run flow would offer.
+onboarding = false
+
+[ui]
+
+# ── Notifications ─────────────────────────────────
+# Why system delivery and not the intuitive "terminal": docs/herdr-notifications.md.
+[ui.toast]
+delivery = "system"
+# The default; suppresses notifications for blips shorter than this.
+delay_seconds = 1
+
+[ui.sound]
+enabled = true
+
+# Per agent: "default", "on" or "off".
+[ui.sound.agents]
+claude = "on"
+
+# ── Theme ─────────────────────────────────────────
+# herdr-radar sets name to one of these two as the desktop turns light or dark,
+# and pins auto_switch = false; leave both of those keys to it. The table itself
+# has to exist, or the plugin cannot switch the theme at all.
+[theme]
+light_name = "catppuccin-latte"
+dark_name = "catppuccin"
+
+# No banner above this table on purpose: herdr-radar appends its two [theme]
+# keys just before the next table header, and would land under it.
+[keys]
+# Jump to the pane behind the last notification.
+open_notification_target = "prefix+g"
+
+# herdr-radar's two actions worth a key. Prefix keys only, so nothing running in
+# a pane receives them; neither collides with a Herdr default.
+[[keys.command]]
+key = "prefix+a"
+type = "plugin_action"
+command = "hhdebb.herdr-radar.view-flip"
+description = "Agents: active <-> recent"
+
+[[keys.command]]
+key = "prefix+comma"
+type = "plugin_action"
+command = "hhdebb.herdr-radar.settings"
+description = "herdr-radar settings"
