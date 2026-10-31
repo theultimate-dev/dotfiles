@@ -35,8 +35,10 @@ hunk has no include mechanism to hook into. It takes its own backups before touc
 Steps 1 and 2 also install software and write credentials, but only into each tool's own
 configuration directory. The one exception is the Herdr plugin `setup.sh` installs: it copies its
 icon font into `~/Library/Fonts` and appends a block of its own, fenced by `herdr-radar` markers,
-to `~/.config/ghostty/config.ghostty`. Step 7 creates Colima's VM in Colima's own `~/.colima` and
-caches its image in `~/Library/Caches/colima`. Steps 2 and 4 are interactive — a browser login, a
+to each Ghostty config file that already exists, `~/.config/ghostty/config.ghostty` among them —
+see [Herdr plugins](agent-tooling.md#herdr-plugins) for the full list and the `./install.sh
+--check` warning it can cause. Step 7 creates Colima's VM in Colima's own `~/.colima` and caches
+its image in `~/Library/Caches/colima`. Steps 2 and 4 are interactive — a browser login, a
 settings pane — and have no terminal equivalent.
 
 **Snapshot.** Do this once, before step 1. It is the difference between "I changed something" and

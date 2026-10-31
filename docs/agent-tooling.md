@@ -194,9 +194,11 @@ through a script — see [step 3 of the manual setup](manual-setup.md#3-configur
 [ADR 0013](decisions/0013-apply-the-herdr-config-by-hand.md) for why.
 
 - **Converging on the pin:** a plugin that `herdr plugin list` already shows at the pinned commit is
-  left alone, enabled or not. Anything else is installed with `herdr plugin install --yes --ref
-  <tag>`, and `setup.sh` warns when the tag now resolves to a different commit. A tag that moved
-  after it was pinned is worth a look before you trust it.
+  left alone, enabled or not. Anything else is installed with `herdr plugin install <owner/repo>
+  --ref <tag> --yes`, and `setup.sh` warns when the tag now resolves to a different commit. A tag
+  that moved after it was pinned is worth a look before you trust it. The repository goes first:
+  Herdr 0.9.0 rejects the options ahead of it as a usage error, although its `--help` lists them
+  there; 0.9.5 accepts either order.
 - **Bumps:** [Renovate](https://docs.renovatebot.com) opens a pull request when a pinned plugin
   publishes a newer tag, changing the tag and the commit together. `renovate.json` limits it to
   this one file; Dependabot keeps the GitHub Actions, and cannot take this over, because it reads
@@ -220,10 +222,20 @@ of [step 3](manual-setup.md#3-configure-herdr) runs once for exactly this reason
 
 **What herdr-radar writes outside Herdr's own directories:** its icon font, into
 `~/Library/Fonts`, and a `# >>> herdr-radar font block` of `font-codepoint-map` lines appended to
-`~/.config/ghostty/config.ghostty`. That is the stub `install.sh` writes, and the plugin's block
-sits below the installer's own; the two coexist, and `./install.sh --check` still passes. Because
-the stub is a real file and not a symlink, the block lands on your machine and never in this
-repository.
+every Ghostty config file that already exists, even an empty one: `config` and `config.ghostty`,
+both in `~/.config/ghostty/` and in `~/Library/Application Support/com.mitchellh.ghostty/`. It
+never creates one. In `~/.config/ghostty/config.ghostty`, the stub `install.sh` writes, the
+plugin's block sits below the installer's own; the two coexist, and `./install.sh --check` still
+passes. Because the stub is a real file and not a symlink, the block lands on your machine and
+never in this repository.
+
+**The same block in Application Support makes `./install.sh --check` warn.** If a Ghostty config
+file exists there, even an empty one, the plugin fills it with a copy of the lines the stub already
+carries. Ghostty loads both files, so the mapping is applied twice, which is harmless.
+The installer, which warns about any non-empty file there because a `config-file` line repeated in
+it makes Ghostty report a cycle, then prints `… is non-empty; Ghostty loads it too` and still
+passes. If that file holds nothing but the plugin's block, deleting it silences the warning for
+good: the plugin writes only into files that exist.
 
 ---
 
