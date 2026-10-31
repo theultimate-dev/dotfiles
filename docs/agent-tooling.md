@@ -222,10 +222,20 @@ of [step 3](manual-setup.md#3-configure-herdr) runs once for exactly this reason
 
 **What herdr-radar writes outside Herdr's own directories:** its icon font, into
 `~/Library/Fonts`, and a `# >>> herdr-radar font block` of `font-codepoint-map` lines appended to
-`~/.config/ghostty/config.ghostty`. That is the stub `install.sh` writes, and the plugin's block
-sits below the installer's own; the two coexist, and `./install.sh --check` still passes. Because
-the stub is a real file and not a symlink, the block lands on your machine and never in this
-repository.
+every Ghostty config file that already exists, even an empty one: `config` and `config.ghostty`,
+both in `~/.config/ghostty/` and in `~/Library/Application Support/com.mitchellh.ghostty/`. It
+never creates one. In `~/.config/ghostty/config.ghostty`, the stub `install.sh` writes, the
+plugin's block sits below the installer's own; the two coexist, and `./install.sh --check` still
+passes. Because the stub is a real file and not a symlink, the block lands on your machine and
+never in this repository.
+
+**The same block in Application Support makes `./install.sh --check` warn.** If a Ghostty config
+file exists there, even an empty one, the plugin fills it with a copy of the lines the stub already
+carries. Ghostty loads both files, so the mapping is applied twice, which is harmless.
+The installer, which warns about any non-empty file there because a `config-file` line repeated in
+it makes Ghostty report a cycle, then prints `… is non-empty; Ghostty loads it too` and still
+passes. If that file holds nothing but the plugin's block, deleting it silences the warning for
+good: the plugin writes only into files that exist.
 
 ---
 

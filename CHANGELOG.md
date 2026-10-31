@@ -17,10 +17,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   working and which are waiting on you, grouped by project, with `prefix+a` to flip its order and
   `prefix+comma` for its settings. `setup.sh` installs the plugin at the release pinned in
   `herdr/plugins.txt`, and Renovate opens a pull request for each new one. The plugin needs Node 18
-  or newer, which this repository does not install yet. **Upgrade steps:** run `./setup.sh`, then
-  [step 3 of the manual setup](docs/manual-setup.md#3-configure-herdr), which copies the files onto
-  a Mac with no Herdr config yet, says what to merge into one that has, and writes the plugin's
-  sidebar into Herdr's config. Step 3 also has a prompt to hand the whole step to an agent.
+  or newer, which this repository does not install yet. It also maps its icon font in every Ghostty
+  config file that already exists; one in `~/Library/Application Support/com.mitchellh.ghostty/`
+  makes `./install.sh --check` warn that the file is non-empty, which is harmless, and
+  [Herdr plugins](docs/agent-tooling.md#herdr-plugins) says how to silence it. **Upgrade steps:**
+  run `./setup.sh`, then [step 3 of the manual setup](docs/manual-setup.md#3-configure-herdr),
+  which copies the files onto a Mac with no Herdr config yet, says what to merge into one that has,
+  and writes the plugin's sidebar into Herdr's config. Step 3 also has a prompt to hand the whole
+  step to an agent.
 
 ### Changed
 
