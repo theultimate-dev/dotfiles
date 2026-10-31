@@ -194,9 +194,11 @@ through a script — see [step 3 of the manual setup](manual-setup.md#3-configur
 [ADR 0013](decisions/0013-apply-the-herdr-config-by-hand.md) for why.
 
 - **Converging on the pin:** a plugin that `herdr plugin list` already shows at the pinned commit is
-  left alone, enabled or not. Anything else is installed with `herdr plugin install --yes --ref
-  <tag>`, and `setup.sh` warns when the tag now resolves to a different commit. A tag that moved
-  after it was pinned is worth a look before you trust it.
+  left alone, enabled or not. Anything else is installed with `herdr plugin install <owner/repo>
+  --ref <tag> --yes`, and `setup.sh` warns when the tag now resolves to a different commit. A tag
+  that moved after it was pinned is worth a look before you trust it. The repository goes first:
+  Herdr 0.9.0 rejects the options ahead of it as a usage error, although its `--help` lists them
+  there; 0.9.5 accepts either order.
 - **Bumps:** [Renovate](https://docs.renovatebot.com) opens a pull request when a pinned plugin
   publishes a newer tag, changing the tag and the commit together. `renovate.json` limits it to
   this one file; Dependabot keeps the GitHub Actions, and cannot take this over, because it reads

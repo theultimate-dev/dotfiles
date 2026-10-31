@@ -216,6 +216,9 @@ step "Herdr plugins"
 # the ref an install asked for, so a plugin installed at a tag reads as
 # `@v1.5.0` there and never matches a commit. The list is read on fd 3 so that
 # herdr cannot consume the loop's input.
+#
+# The repository goes before the options: Herdr 0.9.0, the oldest the pinned
+# plugins support, rejects `--yes --ref <tag>` ahead of it as a usage error.
 if command -v herdr >/dev/null 2>&1; then
   command -v node >/dev/null 2>&1 \
     || warn "node not found on PATH. The pinned Herdr plugins run on Node 18 or newer."
@@ -232,7 +235,7 @@ if command -v herdr >/dev/null 2>&1; then
     esac
 
     echo "$id: installing $source@$tag"
-    if ! herdr plugin install --yes --ref "$tag" "$source"; then
+    if ! herdr plugin install "$source" --ref "$tag" --yes; then
       warn "failed to install plugin: $id"
       continue
     fi
