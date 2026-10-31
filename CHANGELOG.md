@@ -28,18 +28,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Step 3 of the manual setup, Herdr notifications, is now "Configure Herdr". It applies the tracked
-  `herdr/config.toml` instead of appending four tables to your Herdr config by hand. A config set
-  up from the old step already holds those tables; merge the rest of the file into it as step 3
-  describes.
+- Herdr notifications, step 4 of the manual setup in 0.3.0, is now step 3, "Configure Herdr". It
+  applies the tracked `herdr/config.toml` instead of appending four tables to your Herdr config by
+  hand. A config set up from the old step already holds those tables; merge the rest of the file
+  into it as step 3 describes.
 
 ### Removed
 
 - T3 Code. It is no longer in the `Brewfile`, `setup.sh` neither installs it nor reports a copy
   you installed by hand, and its step in the manual setup is gone, so the later steps there move
-  up one number: Herdr notifications is now step 3 and Colima step 7. An existing installation is
-  left alone; to remove it, run `brew uninstall --cask t3-code`, and revoke any provider API keys
-  you issued for it.
+  up one number: the Herdr step is now step 3 and Colima step 7. An existing installation is left
+  alone; to remove it, run `brew uninstall --cask t3-code`, and revoke any provider API keys you
+  issued for it.
 
 ## [0.3.0] - 2026-10-29
 
