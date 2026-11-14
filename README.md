@@ -276,6 +276,9 @@ manual — see [Manual setup](docs/manual-setup.md).
   not do what everyone expects, why `branch.autoSetupMerge = simple` is the other half of it, and
   why the popular `push.default = current` workaround is worse than the problem: the push succeeds,
   but git then misreports your branch instead of erroring.
+- [Git pull default](docs/git-pull-default.md) — why a bare `git pull` here only fast-forwards and
+  stops when both sides have commits, which commands still rebase and merge, and the trap: this
+  one key silently beats a `pull.rebase` set in your own `~/.gitconfig`.
 - [Herdr notifications on macOS](docs/herdr-notifications.md) — how to get reliable "your agent
   finished" notifications when running coding agents inside [Herdr](https://herdr.dev) in
   [Ghostty](https://ghostty.org). A multiplexer swallows the escape sequence your agent emits, so

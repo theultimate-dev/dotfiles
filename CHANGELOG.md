@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `pull.ff = only` in the git defaults: a bare `git pull` fast-forwards when it can and stops when
+  your branch and its upstream both have commits, so it never creates a merge commit or rewrites
+  your commits without being asked. `git pull --rebase`, `git pull --no-rebase` and `git rebase`
+  work as before. **If your `~/.gitconfig` sets `pull.rebase`,** a bare `git pull` on a diverged
+  branch now stops instead of rebasing or merging, because this key wins over `pull.rebase` from
+  any file; add `pull.ff = true` next to it to keep what you had.
+  [docs/git-pull-default.md](docs/git-pull-default.md) has the measurements. **Upgrade steps:**
+  none. The setting is live as soon as the repository is updated.
+
 ## [0.4.0] - 2026-10-31
 
 ### Added

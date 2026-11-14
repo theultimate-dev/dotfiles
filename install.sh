@@ -356,7 +356,7 @@ fi
 
 # System-scope shadow check (informational)
 if command -v git >/dev/null 2>&1; then
-  for key in push.autoSetupRemote push.default branch.autoSetupMerge; do
+  for key in push.autoSetupRemote push.default branch.autoSetupMerge pull.ff; do
     if git config --system --get "$key" >/dev/null 2>&1; then
       warn "system-scope git config defines $key; this layer will shadow it"
     fi
