@@ -3,7 +3,7 @@
 # This file is never installed over your git config. It is pulled in by an
 # [include] directive from ${XDG_CONFIG_HOME:-~/.config}/git/config, which git
 # reads BEFORE ~/.gitconfig — so anything you set yourself overrides everything
-# here. See docs/git-push-defaults.md.
+# here. See docs/git-push-defaults.md and docs/git-pull-default.md.
 #
 # No [user] section lives here, ever. Identity belongs in ~/.gitconfig.
 
@@ -22,6 +22,15 @@
 	# origin/main into feat/x therefore leaves no upstream, which is exactly the
 	# state autoSetupRemote handles. Requires git >= 2.37.
 	autoSetupMerge = simple
+
+[pull]
+	# A bare `git pull` may only fast-forward. When both sides have commits it
+	# stops, and you choose: `git pull --rebase` or `git pull --no-rebase`.
+	#
+	# This wins over pull.rebase and branch.<name>.rebase from ANY file, your
+	# ~/.gitconfig included. To have a bare pull rebase again, set pull.ff = true
+	# next to your pull.rebase there -- see docs/git-pull-default.md.
+	ff = only
 
 [alias]
 	# Review with hunk instead of the plain pager: `git hdiff`, `git hshow`,
