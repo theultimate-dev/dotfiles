@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-14
+
 ### Added
 
 - `pull.ff = only` in the git defaults: a bare `git pull` fast-forwards when it can and stops when
@@ -174,7 +176,8 @@ reasoning behind each recorded in `docs/` and `docs/decisions/`.
 - MIT licence, covering the configuration and documentation in this repository. The third-party
   tools shown here remain under their own licences.
 
-[Unreleased]: https://github.com/theultimate-dev/dotfiles/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/theultimate-dev/dotfiles/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/theultimate-dev/dotfiles/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/theultimate-dev/dotfiles/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/theultimate-dev/dotfiles/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/theultimate-dev/dotfiles/compare/v0.1.0...v0.2.0
