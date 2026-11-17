@@ -34,11 +34,11 @@ file but a variable: `install.sh` appends a named block to `~/.zshenv` that expo
 Every edit takes effect the next time Yazi starts, and `git diff` audits all of it.
 
 Why `~/.zshenv`: zsh reads it for every shell, login or not, interactive or not. A Yazi started
-from a Ghostty tab, from Zed's terminal, or inside a Herdr pane sees the variable. `~/.zshrc` only
-reaches interactive shells, and it is the file every shell framework and vendor installer wants to
-edit anyway. The block is appended rather than prepended because in a shell the last export
-wins, which keeps this repo a defaults layer: an export you type below the block survives every
-re-run and overrides it.
+from a Ghostty tab, from an editor's built-in terminal, or inside a Herdr pane sees the variable.
+`~/.zshrc` only reaches interactive shells, and it is the file every shell framework and vendor
+installer wants to edit anyway. The block is appended rather than prepended because in a shell the
+last export wins, which keeps this repo a defaults layer: an export you type below the block
+survives every re-run and overrides it.
 
 Two costs come with the variable, and both are accepted in
 [ADR 0010](decisions/0010-export-a-config-directory-variable-from-zshenv.md):
@@ -68,7 +68,7 @@ shell that ran them, and it misbehaves in two ways that look unrelated:
   `yazi` in the current directory, and does what `auto_cd` does. One directory up there is no such
   directory, the `$PATH` fallback runs, and Yazi starts, which is what makes it look random.
 
-Both have the same cure: open a new shell. A new Ghostty tab, a new Herdr pane or a new Zed
+Both have the same cure: open a new shell. A new Ghostty tab, a new Herdr pane or a new editor
 terminal all start a fresh zsh that reads `~/.zshenv` and has an empty hash. To repair the shell
 you are in instead, run `source ~/.zshenv; rehash`. Neither Ghostty nor Herdr needs restarting.
 
@@ -179,20 +179,16 @@ config make it work, and both are needed:
 The signs and their colours are Yazi theme keys under `[git]` in a `theme.toml`; this repo ships
 none, so the plugin's defaults apply.
 
-## Icons: two hosts, two answers
+## Icons: the terminal decides
 
 Yazi's file icons and the git plugin's signs are Nerd Font glyphs. Whether they render depends on
-the terminal, not on Yazi:
+the terminal, not on Yazi. Ghostty ships the Nerd Font symbols built in and falls back to them for
+any glyph the configured font lacks, so `JetBrains Mono` in `ghostty/config.ghostty` needs nothing
+extra, and the `Brewfile` installs no Nerd Font.
 
-- **Ghostty** ships the Nerd Font symbols built in and falls back to them for any glyph the
-  configured font lacks, so `JetBrains Mono` in `ghostty/config.ghostty` needs nothing extra.
-- **Zed's terminal** has no such fallback. The `Brewfile` installs the
-  `font-symbols-only-nerd-font` cask for it, and Zed still has to be told to fall back to that
-  font. Zed's settings are unmanaged here
-  ([ADR 0005](decisions/0005-install-agent-tooling-without-managing-its-config.md)), so the
-  edit is a manual step, in [Manual setup](manual-setup.md#6-yazi-icons-in-zeds-terminal).
-
-Without the font, the icons show as empty boxes; Yazi itself works.
+A terminal without that fallback, such as an editor's built-in terminal, shows the icons as empty
+boxes; Yazi itself works. The cure there is a Nerd Font symbols font, installed and set as that
+terminal's font fallback in its own settings, which this repo does not manage.
 
 ## Plugins: fetched into the repo, restored by `setup.sh`
 

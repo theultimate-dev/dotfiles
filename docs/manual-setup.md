@@ -15,7 +15,7 @@ expands it for you.
 macOS only. Git push defaults additionally need **git 2.37 or newer** — check with `git --version`,
 because on older git the settings `install.sh` activates are silently inert.
 
-**What gets written.** Six files outside this repo by hand, and nothing else. No step creates a
+**What gets written.** Five files outside this repo by hand, and nothing else. No step creates a
 symlink, and no step overwrites a file holding settings of yours — step 3 replaces Herdr's config
 only while it holds nothing but the `onboarding = false` Herdr's first run writes:
 
@@ -25,8 +25,7 @@ only while it holds nothing but the `onboarding = false` Herdr's first run write
 | `~/.config/herdr/plugins/config/hhdebb.herdr-radar/config.toml` | 3 | copied from `herdr/`, or merged | absent until you save herdr-radar's settings |
 | `~/.claude/settings.json` | 3 | one key added | present if Claude Code is installed |
 | `~/.grok/config.toml` | 5 | edited only if the collision fires | conditional |
-| `~/.config/zed/settings.json` | 6 | one key added | present if Zed has been run |
-| `~/.docker/config.json` | 7 | one key added; Colima then sets the current context, defined in `~/.docker/contexts/` | absent until Docker or Colima first runs |
+| `~/.docker/config.json` | 6 | one key added; Colima then sets the current context, defined in `~/.docker/contexts/` | absent until Docker or Colima first runs |
 
 `install.sh` in step 1 additionally writes three managed blocks — the include stubs
 `~/.config/git/config` and `~/.config/ghostty/config.ghostty`, and an `export` of `YAZI_CONFIG_HOME`
@@ -37,7 +36,7 @@ configuration directory. The one exception is the Herdr plugin `setup.sh` instal
 icon font into `~/Library/Fonts` and appends a block of its own, fenced by `herdr-radar` markers,
 to each Ghostty config file that already exists, `~/.config/ghostty/config.ghostty` among them —
 see [Herdr plugins](agent-tooling.md#herdr-plugins) for the full list and the `./install.sh
---check` warning it can cause. Step 7 creates Colima's VM in Colima's own `~/.colima` and caches
+--check` warning it can cause. Step 6 creates Colima's VM in Colima's own `~/.colima` and caches
 its image in `~/Library/Caches/colima`. Steps 2 and 4 are interactive — a browser login, a
 settings pane — and have no terminal equivalent.
 
@@ -48,7 +47,7 @@ settings pane — and have no terminal equivalent.
 mkdir -p ~/.dotfiles-backup
 
 for f in ~/.config/herdr/config.toml ~/.claude/settings.json ~/.grok/config.toml \
-         ~/.config/ghostty/config.ghostty ~/.zshenv ~/.config/zed/settings.json \
+         ~/.config/ghostty/config.ghostty ~/.zshenv \
          ~/.config/hunk/config.toml ~/.docker/config.json \
          ~/.config/herdr/plugins/config/hhdebb.herdr-radar/config.toml; do
   if [ -e "$f" ]; then
@@ -82,15 +81,15 @@ known-good state than from a half-applied one.
 the file outright if the loop above reported it absent. Each step below names its own.
 
 **Order.** Steps 1 and 2 run in sequence — you cannot log in to a tool that is not installed yet.
-Steps 3 to 7 are independent of each other and of the first two: run them in any order, or skip
-the ones you do not want. (Steps 3, 5, 6 and 7 configure tools that step 1 installs; if you
-skipped step 1 there is simply nothing there to configure.)
+Steps 3 to 6 are independent of each other and of the first two: run them in any order, or skip
+the ones you do not want. (Steps 3, 5 and 6 configure tools that step 1 installs; if you skipped
+step 1 there is simply nothing there to configure.)
 
 ---
 
 ## 1. Install the tools and place configs
 
-**What you get.** Homebrew plus every tool the rest of this guide configures — Ghostty, Zed, Herdr,
+**What you get.** Homebrew plus every tool the rest of this guide configures — Ghostty, Herdr,
 `terminal-notifier`, Yazi with Leaf and the tools its previews run through, Colima with the Docker
 CLI and its Compose and Buildx plugins, and the coding agent CLIs — installed and on `$PATH`, with
 Herdr's session-identity integration registered for each agent whose config directory already
@@ -115,8 +114,8 @@ you had installed by hand alone, skips integrations already marked current, and 
 plugin alone once it is at its pinned commit. `install.sh`
 verifies and maintains native include stubs without touching existing user configurations.
 
-**Already have Ghostty or Zed in `/Applications`?** `setup.sh` lists an app it did not
-install, leaves it alone, and installs everything else. To hand those apps over to Homebrew:
+**Already have Ghostty in `/Applications`?** `setup.sh` lists an app it did not install, leaves
+it alone, and installs everything else. To hand it over to Homebrew:
 
 ```sh
 ./setup.sh --adopt
@@ -153,7 +152,7 @@ wrote. Then, in any git repository with an uncommitted change, `yazi` shows a ma
 changed file, hovering a `.md` file renders it in the preview pane, and Enter on it opens Leaf.
 
 An app `setup.sh` skipped shows up in the first check as missing until you adopt it. That is the
-expected state, not drift. After `--adopt`, `brew list --cask zed` names it.
+expected state, not drift. After `--adopt`, `brew list --cask ghostty` names it.
 
 **Undo.** Not `brew bundle cleanup` — that removes what is *not* in the `Brewfile`. Uninstall per
 entry instead, and remove Homebrew itself only with its own uninstaller:
@@ -174,8 +173,8 @@ config before it goes. If `~/.zshenv` did not exist before, delete it instead of
 snapshot loop above reported which. Yazi's plugin code is inside the repo under `yazi/plugins/`,
 untracked, and goes away with the clone.
 
-Adoption has no undo that keeps the app: `brew uninstall --cask zed` removes the bundle Homebrew
-took over. To have it outside Homebrew again, reinstall it from the vendor's download.
+Adoption has no undo that keeps the app: `brew uninstall --cask ghostty` removes the bundle
+Homebrew took over. To have it outside Homebrew again, reinstall it from the vendor's download.
 
 **Why it works this way.** Homebrew is the single installer of record because the vendors' curl
 scripts rewrite `~/.zshrc` and symlink into `$HOME` — see
@@ -227,11 +226,93 @@ brew install glow
 Leaf can remain installed while you verify the rollback. To remove it afterwards, use the
 per-entry uninstall procedure above with the `leaf-markdown-viewer` formula.
 
+### Remove Zed and Copilot CLI from an existing installation
+
+Zed, GitHub Copilot CLI and the `font-symbols-only-nerd-font` cask are no longer in the `Brewfile`,
+and `setup.sh` no longer registers Herdr's Copilot integration. `setup.sh` never uninstalls
+anything, so an installation made before that change keeps all three, and the integration, until
+you remove them here. This is optional: skip it, or any part of it, for a tool you still use.
+Nothing else in this guide depends on them being gone.
+
+**Do this.** First, see which of the three casks Homebrew manages on this Mac. A tool you
+installed by hand and never adopted is not on the list, and Homebrew cannot remove it:
+
+```sh
+brew list --cask | grep -x -E 'zed|copilot-cli|font-symbols-only-nerd-font'
+```
+
+If you want Copilot CLI's login gone from this Mac, sign out before uninstalling: start `copilot`,
+type `/logout`, then quit. macOS keeps that credential in the Keychain, under the service
+`copilot-cli`, and no uninstall below touches it. Signing out removes only the local token; to end
+the authorization itself, revoke it at GitHub as well.
+
+Then Herdr's Copilot integration, while Herdr is installed and `~/.copilot` still exists, because
+the hook it removes lives in that directory:
+
+```sh
+herdr integration uninstall copilot
+```
+
+Then the casks. Name only the ones the first command printed, and leave out any you want to keep:
+
+```sh
+brew uninstall --cask zed copilot-cli font-symbols-only-nerd-font
+```
+
+That removes the apps, the `zed` and `copilot` commands and the symbols font, and keeps your
+settings and data. To delete those files as well, run the same command with `--zap` instead,
+naming the same casks:
+
+```sh
+brew uninstall --zap --cask zed copilot-cli font-symbols-only-nerd-font
+```
+
+`--zap` moves to the Trash Zed's `~/.config/zed` and `~/Library/Application Support/Zed` with its
+caches, logs and preferences, and Copilot CLI's `~/.copilot` and `~/Library/Caches/copilot`. It
+leaves the Keychain credential alone; only `/logout` above removes that. Keep the font cask out of
+either command if another terminal of yours falls back to Symbols Nerd Font Mono for its icons.
+
+**Zed you installed yourself.** If `zed` was not printed but `/Applications/Zed.app` exists,
+`setup.sh` left your own copy alone. Do not adopt it just to remove it: quit Zed and drag
+`Zed.app` from `/Applications` to the Trash. Its settings stay in `~/.config/zed` and
+`~/Library/Application Support/Zed` until you trash those folders too.
+
+**Verify.** Each line reports on a tool only if you chose to remove it:
+
+```sh
+herdr integration status | grep '^copilot:'
+brew list --cask | grep -x -E 'zed|copilot-cli|font-symbols-only-nerd-font'
+brew bundle check --file=<repo>/Brewfile
+```
+
+```
+copilot: not installed (…)
+The Brewfile's dependencies are satisfied.
+```
+
+The second command prints only the casks you kept, or nothing. For each tool you removed,
+`command -v zed` or `command -v copilot` prints nothing, and a removed Zed leaves no
+`/Applications/Zed.app`.
+
+**Undo.** Reinstall the casks you removed. After `--zap`, start `copilot` once and quit it, so
+that `~/.copilot` exists again; then put the integration back:
+
+```sh
+brew install --cask zed copilot-cli font-symbols-only-nerd-font
+herdr integration install copilot
+```
+
+Copilot CLI asks you to sign in only if you ran `/logout` or revoked its authorization at GitHub;
+`--zap` alone does not sign you out. A Zed you trashed by hand comes back from the Trash or the
+vendor's download. A later `setup.sh` run neither reinstalls the casks nor re-registers the
+integration, so these steps are the whole undo. Settings removed with `--zap` come back only from
+the Trash, or from a backup of your own.
+
 ---
 
 ## 2. Install and authenticate the coding agents
 
-**What you get.** `claude`, `codex`, `copilot`, `grok` and `agy` start straight into their own
+**What you get.** `claude`, `codex`, `grok` and `agy` start straight into their own
 prompt instead of opening a browser or printing a device code.
 
 **Do this.** Claude Code first, because it is the one agent the `Brewfile` does not install: its
@@ -248,13 +329,12 @@ Then the logins, one at a time. Each opens a browser and waits for you to finish
 ```sh
 claude           # Anthropic, browser login
 codex            # OpenAI, browser login
-copilot          # GitHub, browser login
 grok             # xAI, browser login
 agy auth login   # Google, browser login
 ```
 
 Credentials land in each agent's own configuration directory — `~/.claude`, `~/.codex`,
-`~/.copilot`, `~/.grok`, `~/.gemini`. Nothing in this repo reads, ships, or backs them up.
+`~/.grok`, `~/.gemini`. Nothing in this repo reads, ships, or backs them up.
 
 **Verify.** Start each one again:
 
@@ -357,8 +437,8 @@ herdr integration install claude
 
 Then Claude Code's own notification channel, left enabled so the same agent still notifies
 correctly on the days you run it outside Herdr. `iterm2_with_bell` emits the OSC 9 sequence Ghostty
-turns into a banner *and* a terminal bell — the bell is what Zed's Terminal Threads, and any other
-terminal that never parses OSC 9, key their "agent finished" popup on. In Ghostty the bell only
+turns into a banner *and* a terminal bell — the bell is what a terminal that never parses OSC 9,
+such as Zed's Terminal Threads, keys its "agent finished" popup on. In Ghostty the bell only
 adds a Dock bounce and a 🔔 tab marker (tunable via `bell-features`):
 
 ```sh
@@ -369,9 +449,6 @@ mkdir -p ~/.claude
 If `~/.claude/settings.json` already exists, add `"preferredNotifChannel": "iterm2_with_bell"` to
 its top-level object by hand and leave everything else alone — including the `SessionStart` hook
 Herdr put there.
-
-Zed needs no step of its own: its Terminal Threads key their popup on that bell with Zed's default
-settings — see [One agent setting, three hosts](herdr-notifications.md#one-agent-setting-three-hosts).
 
 **Or hand it to an agent.** Paste this into a coding agent started in the repository. It points the
 agent at the parts above rather than repeating them, so the two cannot drift apart:
@@ -563,36 +640,7 @@ them instead of acting — see
 
 ---
 
-## 6. Yazi icons in Zed's terminal
-
-**What you get.** Yazi's file icons and git status signs rendered in Zed's built-in terminal.
-Ghostty needs nothing: it ships the Nerd Font symbols and falls back to them on its own. Zed has
-no such fallback, so it must be pointed at the symbols font that step 1 installed.
-
-**Do this.** Open Zed's settings (`Cmd+,`) and add a font fallback for the terminal:
-
-```json
-{
-  "terminal": {
-    "font_fallbacks": ["Symbols Nerd Font Mono"]
-  }
-}
-```
-
-**Verify.** In a Zed terminal, `yazi` shows an icon before each file name rather than an empty
-box, and a changed file in a git repository carries its sign.
-
-**Undo.** Remove the `font_fallbacks` line, or restore
-`~/.dotfiles-backup/config-zed-settings.json`.
-
-**Why it works this way.** Zed's settings are unmanaged here, so this is a by-hand edit rather than
-an installer step — see
-[ADR 0005](decisions/0005-install-agent-tooling-without-managing-its-config.md) and
-[Icons: two hosts, two answers](yazi.md#icons-two-hosts-two-answers).
-
----
-
-## 7. Run containers with Colima
+## 6. Run containers with Colima
 
 **What you get.** `docker`, `docker compose` and `docker buildx` working against Colima's Linux VM,
 sized for several Compose stacks at once, with file watchers inside containers seeing the edits
@@ -688,8 +736,7 @@ The rest stays, and stays here:
 | [3. Configure Herdr](#3-configure-herdr) | Herdr's config file is also written by Herdr and herdr-radar; kept in `herdr/` and applied by hand per ADR 0013 |
 | [4. Allow notifications and make them stay on screen](#4-allow-notifications-and-make-them-stay-on-screen) | two GUI toggles only you can flip |
 | [5. Known collisions to check](#5-known-collisions-to-check) | detection is automatable; the remedy edits files this repo does not manage |
-| [6. Yazi icons in Zed's terminal](#6-yazi-icons-in-zeds-terminal) | Zed's settings are unmanaged per ADR 0005 |
-| [7. Run containers with Colima](#7-run-containers-with-colima) | the VM's size is a choice per machine; Colima's config is unmanaged per ADR 0005, and `config.json` is Docker's own |
+| [6. Run containers with Colima](#6-run-containers-with-colima) | the VM's size is a choice per machine; Colima's config is unmanaged per ADR 0005, and `config.json` is Docker's own |
 
 One rule outlives the prune: **a command that writes to `$HOME` appears exactly once in this
 repository.** If a procedure ever comes back out of `install.sh`, it comes back to this file — not

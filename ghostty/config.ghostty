@@ -70,12 +70,12 @@ notify-on-command-finish-after = 10s
 desktop-notifications = true
 
 # Claude Code's iterm2_with_bell channel also rings the terminal bell, for
-# terminals that never parse OSC 9 (Zed's Terminal Threads). With the default
-# `bell-features` (attention,title) that bell bounces the Dock icon once and
-# counts up a badge while Ghostty is unfocused, and prefixes 🔔 to the pane
-# title. That badge is what you see when the notification itself was already
-# dismissed. Once alerts are set to Persistent (docs/manual-setup.md, step 4)
-# the badge is redundant; uncomment to keep only the notification:
+# terminals that never parse OSC 9, such as Zed's Terminal Threads. With the
+# default `bell-features` (attention,title) that bell bounces the Dock icon
+# once and counts up a badge while Ghostty is unfocused, and prefixes 🔔 to
+# the pane title. That badge is what you see when the notification itself was
+# already dismissed. Once alerts are set to Persistent (docs/manual-setup.md,
+# step 4) the badge is redundant; uncomment to keep only the notification:
 # bell-features = no-attention,no-title
 
 # ── Quick terminal ────────────────────────────────

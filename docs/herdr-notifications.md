@@ -173,9 +173,10 @@ outer terminal, and Ghostty's default `bell-features` (`attention,title`) bounce
 counts bells while the window is unfocused. When the alert style is Temporary, that count is the
 only trace that survives, which is why it looks as if the badge is all you get.
 
-The bell stays on: it is what Zed's Terminal Threads key their popup on. If the badge is noise once
-alerts are Persistent, `bell-features = no-attention` in your Ghostty configuration keeps the
-notification and drops the bounce and the badge, and `no-title` also drops the 🔔 in the tab title.
+The bell stays on: a terminal that never parses OSC 9, such as Zed's Terminal Threads, keys its
+popup on it. If the badge is noise once alerts are Persistent, `bell-features = no-attention` in
+your Ghostty configuration keeps the notification and drops the bounce and the badge, and
+`no-title` also drops the 🔔 in the tab title.
 The repo's [`ghostty/config.ghostty`](../ghostty/config.ghostty) carries
 `bell-features = no-attention,no-title` commented out, ready to switch on.
 
@@ -217,20 +218,23 @@ Two things follow:
   OSC 9, such as Zed's Terminal Threads. The channels that were rejected, and why, are in
   [ADR 0008](decisions/0008-keep-one-agent-notification-channel-across-hosts.md).
 
-## One agent setting, three hosts
+## One agent setting, every host
 
 The same `iterm2_with_bell` value is what makes Claude Code notify correctly wherever it runs. What
 differs is who turns the emitted sequence into something you see:
 
 | Host | Claude Code emits | What you see | Sender in System Settings | Stays on screen |
 | --- | --- | --- | --- | --- |
-| Zed Terminal Threads | BEL; the OSC 9 is ignored | Zed's own popup with a **View** button, when the thread is unfocused; `agent.notify_when_agent_waiting` (default `primary_screen`) governs it | none — Zed draws it | Yes, until dismissed |
 | Bare Ghostty | OSC 9 and BEL | Ghostty raises a macOS notification from the OSC 9 (`desktop-notifications = true`); suppressed while the pane is focused, dismissed after 3 s while the window is focused. The bell bounces the Dock icon | Ghostty | Only with Ghostty's style set to Persistent, and only while unfocused |
 | Herdr in Ghostty | OSC 9, swallowed by Herdr; BEL, forwarded | Herdr detects the pane state and posts through `terminal-notifier -activate`; the forwarded bell becomes the Dock badge | terminal-notifier | Only with terminal-notifier's style set to Persistent |
 
-Nothing needs configuring on the Zed side. `terminal.bell` defaults to `off` and only controls the
-audible sound; the popup does not depend on it. Claude Code's `auto` channel keys on
-`TERM_PROGRAM` and sends nothing under Zed — the bell is the whole reason for `iterm2_with_bell`.
+The bell half is for hosts outside this stack. A terminal that never parses OSC 9 sees only the
+BEL, and Claude Code's `auto` channel, which keys on `TERM_PROGRAM`, may send nothing there at all.
+Zed's Terminal Threads were the case that settled it, in
+[ADR 0008](decisions/0008-keep-one-agent-notification-channel-across-hosts.md): they ignore the
+OSC 9, `auto` sends nothing under Zed, and the BEL alone raises Zed's own popup with its default
+settings. `iterm2_with_bell` reaches such a host and Ghostty alike, so nothing is switched per
+host.
 
 ## Troubleshooting
 
