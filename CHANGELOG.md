@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+
+- Zed and GitHub Copilot CLI. Their casks, and the `font-symbols-only-nerd-font` cask that only
+  served Yazi's icons in Zed's terminal, are no longer in the `Brewfile`; `setup.sh` no longer
+  registers Herdr's Copilot integration; and the manual setup's step for Yazi icons in Zed is
+  gone, so the Colima step moves up from step 7 to step 6. An existing installation is left alone,
+  because `setup.sh` never uninstalls anything. **Upgrade steps:** none required. To remove them,
+  follow
+  [Remove Zed and Copilot CLI from an existing installation](docs/manual-setup.md#remove-zed-and-copilot-cli-from-an-existing-installation),
+  which also says what the optional `--zap` deletes; skip it for a tool you still use.
+
 ## [0.5.0] - 2026-11-14
 
 ### Added

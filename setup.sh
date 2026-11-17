@@ -60,15 +60,16 @@ fi
 # An app is "pre-existing and unmanaged" when the bundle is in /Applications
 # but Homebrew has no Caskroom entry for it -- Homebrew's own definition of
 # installed. brew bundle would adopt it, and adoption is not the harmless
-# no-op it looks like: a cask with an artifact inside the bundle (Zed's cli)
-# modifies the bundle, which macOS gates behind the App Management permission
-# for the terminal, may need sudo when the files belong to another user, and
-# on a refused permission ends with Homebrew deleting the app while rolling
-# back. So the default is to skip such apps and say so; --adopt opts in after
-# probing the permission, before brew bundle can reach the destructive path.
+# no-op it looks like: a cask that writes inside the bundle modifies an app
+# the terminal did not install, which macOS gates behind the App Management
+# permission, may need sudo when the files belong to another user, and on a
+# refused permission ends with Homebrew deleting the app while rolling back.
+# Ghostty's cask only links man pages and completions out of the bundle, but
+# the skip is the default for every app cask listed here, present or future.
+# --adopt opts in after probing the permission, before brew bundle can reach
+# the destructive path.
 # See docs/agent-tooling.md, "Apps you installed before Homebrew did".
-CASK_APPS='ghostty:Ghostty.app
-zed:Zed.app'
+CASK_APPS='ghostty:Ghostty.app'
 
 CASKROOM="$(brew --prefix)/Caskroom"
 UNMANAGED_TOKENS=""
@@ -183,7 +184,7 @@ fi
 step "Herdr integrations"
 if command -v herdr >/dev/null 2>&1; then
   HERDR_STATUS="$(herdr integration status 2>/dev/null || true)"
-  HERDR_INTEGRATIONS="claude:.claude codex:.codex copilot:.copilot antigravity-cli:.gemini/config grok:.grok"
+  HERDR_INTEGRATIONS="claude:.claude codex:.codex antigravity-cli:.gemini/config grok:.grok"
 
   for entry in $HERDR_INTEGRATIONS; do
     id="${entry%%:*}"

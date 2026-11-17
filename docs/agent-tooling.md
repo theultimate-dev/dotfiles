@@ -11,12 +11,11 @@ This covers the rationale behind package management choices in `Brewfile`, the m
 Every daily tool in this repository is delivered via Homebrew:
 
 - **Terminal emulator:** [Ghostty](https://ghostty.org).
-- **Editors:** [micro](https://micro-editor.github.io) in the terminal, for quick edits next to a
-  running agent; [Zed](https://zed.dev) as a GUI app.
+- **Editor:** [micro](https://micro-editor.github.io) in the terminal, for quick edits next to a
+  running agent.
 - **Terminal multiplexer & notifier:** [Herdr](https://herdr.dev) and
   [`terminal-notifier`](https://github.com/julienXX/terminal-notifier).
 - **Coding agent CLIs:** [OpenAI Codex](https://github.com/openai/codex),
-  [GitHub Copilot CLI](https://docs.github.com/en/copilot/concepts/agents/about-copilot-cli),
   [Google Antigravity CLI](https://antigravity.google/product/antigravity-cli), and
   [xAI Grok Build](https://x.ai/build).
 
@@ -26,7 +25,7 @@ strictly separated per `AGENTS.md`. Shell add-ons (Oh My Zsh, plugins) and versi
 
 ### Two intentional deviations from vendor install channels
 
-Seven of the nine tools explicitly document Homebrew as a supported or primary installation
+Five of the seven tools explicitly document Homebrew as a supported or primary installation
 channel. Two do not:
 
 1. **`antigravity-cli` (Google Antigravity CLI):** Vendor documentation promotes an interactive
@@ -55,8 +54,6 @@ machine. In a principled dotfiles environment, those scripts introduce severe fa
     against any existing cask version.
   - **Google Antigravity:** The installer inspects `~/.local/bin/agy` and unconditionally exits 0
     without upgrading if a file is already present.
-  - **Zed:** Upstream's `install.sh` is documented exclusively for Linux; on macOS, running it
-    blindly executes `rm -rf /Applications/Zed.app` before repopulating it.
 
 Homebrew casks avoid these pathologies by isolating downloads, staging applications cleanly into
 `/Applications` or `/opt/homebrew`, and managing `$PATH` binaries without mutating user dotfiles.
@@ -78,12 +75,12 @@ Homebrew casks avoid these pathologies by isolating downloads, staging applicati
 
 Rule #1 states: **Nothing in this repo ever creates a symlink in `$HOME`.**
 
-While the `ghostty`, `zed`, and CLI casks internally make extensive use of symbolic links, **none
-of those links reside in `$HOME`**:
+While the `ghostty` and CLI casks internally make extensive use of symbolic links, **none of
+those links reside in `$HOME`**:
 
-- Applications reside in `/Applications/Ghostty.app` and `/Applications/Zed.app`.
-- CLI binaries link into `/opt/homebrew/bin/` (e.g., `ghostty`, `zed`, `codex`, `copilot`, `agy`,
-  `grok`, `terminal-notifier`).
+- The application resides in `/Applications/Ghostty.app`.
+- CLI binaries link into `/opt/homebrew/bin/` (e.g., `codex`, `agy`, `grok`,
+  `terminal-notifier`).
 - Manual pages link into `/opt/homebrew/share/man/`.
 - Shell completions link into Homebrew's shared site-functions (within `/opt/homebrew/share/zsh`).
 - Caskroom versions link under `/opt/homebrew/Caskroom/`.
@@ -95,16 +92,17 @@ user profile.
 
 ## `auto_updates` casks: installer-of-record, not version manager
 
-Four casks declared in `Brewfile` (`ghostty`, `zed`, `copilot-cli`, `antigravity-cli`) are
-declared with `auto_updates true` in Homebrew Cask.
+One cask declared in `Brewfile`, `ghostty`, is declared with `auto_updates true` in Homebrew
+Cask. `antigravity-cli` is not: its cask disables the CLI's own self-updating, so Homebrew
+upgrades it like any other cask.
 
-For these packages, **Homebrew serves as the installer-of-record, not the ongoing version
+For such a cask, **Homebrew serves as the installer-of-record, not the ongoing version
 manager**.
 
 By design, `brew upgrade --cask` and `brew outdated` permanently skip `auto_updates` casks. The
 application or binary manages its own updates via Sparkle or background self-updating routines.
 This divergence is visible on a healthy system: the Caskroom directory records the version Homebrew
-installed, while `copilot --version` or the Zed *About* box reports whatever the app has since
+installed, while Ghostty's *About* box reports whatever the app has since
 updated itself to, often many releases ahead. The Caskroom number is not the truth.
 [ADR 0004](decisions/0004-let-auto-updating-casks-manage-their-own-versions.md) records the gap
 observed when the decision was made.
@@ -140,14 +138,13 @@ finds installed outside Homebrew — see
 `setup.sh` configures native integrations for the supported toolset:
 
 ```bash
-HERDR_INTEGRATIONS="claude:.claude codex:.codex copilot:.copilot antigravity-cli:.gemini/config grok:.grok"
+HERDR_INTEGRATIONS="claude:.claude codex:.codex antigravity-cli:.gemini/config grok:.grok"
 ```
 
 | Agent | Herdr Id | Precondition Directory | What Herdr Writes |
 |---|---|---|---|
 | Claude Code | `claude` | `~/.claude/` | `~/.claude/hooks/herdr-agent-state.sh`, `~/.claude/settings.json` |
 | OpenAI Codex | `codex` | `~/.codex/` | `~/.codex/herdr-agent-state.sh`, `~/.codex/hooks.json` |
-| GitHub Copilot | `copilot` | `~/.copilot/` | `~/.copilot/hooks/herdr-agent-state.sh`, `~/.copilot/settings.json` |
 | Google Antigravity | `antigravity-cli` | `~/.gemini/config/` | `~/.gemini/config/hooks/herdr-agent-state.sh` |
 | xAI Grok Build | `grok` | `~/.grok/` | `~/.grok/hooks/herdr-agent-state.sh` |
 
@@ -170,7 +167,7 @@ It is vital to understand what these integrations provide and what they do not:
   a notice to launch the agent once and re-run.
 - **Idempotency against shared JSON:** Upstream Herdr does not guarantee deduplicated insertion
   when merging hooks into shared configuration files (`~/.claude/settings.json`,
-  `~/.codex/hooks.json`, `~/.copilot/settings.json`). `setup.sh` guards updates by checking whether
+  `~/.codex/hooks.json`). `setup.sh` guards updates by checking whether
   the agent is already marked `current` in `herdr integration status`. If current, the install step
   is skipped entirely.
 - **No background service side-effect:** `setup.sh` does not run `brew services start herdr`.
@@ -294,25 +291,27 @@ must be applied manually once Grok has been initialized.
 
 ## Apps you installed before Homebrew did
 
-`setup.sh` looks at every cask in the `Brewfile` that installs an application bundle — Ghostty
-and Zed — and treats the app as **pre-existing and unmanaged** when the bundle is already in
+`setup.sh` looks at every cask in the `Brewfile` that installs an application bundle — today
+only Ghostty — and treats the app as **pre-existing and unmanaged** when the bundle is already in
 `/Applications` but Homebrew has no Caskroom entry for it. Those apps are skipped, through
 `HOMEBREW_BUNDLE_CASK_SKIP`, and listed. Nothing is adopted unless `setup.sh` is run with
 `--adopt`. The reason is what adoption actually does:
 
 - `brew bundle` passes `--adopt` to every cask install, and adoption is not the no-op it looks
-  like. When the cask has an artifact *inside* the bundle — Zed's `binary` stanza links
-  `Zed.app/Contents/MacOS/cli` to `/opt/homebrew/bin/zed` — Homebrew writes a Spotlight
-  alternate-name attribute onto that file. Since macOS 13, modifying an app bundle that your
-  terminal did not install requires the **App Management** privacy permission, so macOS shows a
-  dialog asking to let the terminal update or delete other applications.
+  like. When adopting writes inside the bundle — the case that surfaced this was a `binary` stanza
+  pointing into the app, onto which Homebrew wrote a Spotlight alternate-name attribute — macOS
+  13 and later require the **App Management** privacy permission for a terminal modifying an app
+  bundle it did not install, so macOS shows a dialog asking to let the terminal update or delete
+  other applications. Ghostty's cask has no `binary` stanza; it links its man pages and shell
+  completions *out of* the bundle. The skip stays the default all the same, for every app cask
+  this list holds now or later.
 - The attempt that triggers the dialog fails with `Operation not permitted` whatever you answer;
   Homebrew's own advice is to approve and run the command again. `brew install`, however, treats
   the failure as an install error and rolls back: it copies the app into the Caskroom as a backup,
   removes it from `/Applications`, then purges that Caskroom version — backup included. In the
   transcript this reads `Backing up App`, `Removing App`, `Purging files for version …`, and the
-  app you installed by hand is gone. Your data is not: Zed keeps it in `~/.config/zed` and
-  `~/Library/Application Support/Zed`, so a reinstall picks everything up.
+  app you installed by hand is gone. Your data usually is not: an app such as Ghostty keeps it
+  under `~/.config` and `~/Library`, outside the bundle, so a reinstall picks everything up.
 - A `Password:` prompt can appear too. It is Homebrew's `sudo`, not this script's — used to copy
   and re-own bundle files that belong to another user, and for the `chmod` before that attribute
   write. It also shows up far earlier in the transcript than the step that caused it: `brew
@@ -327,5 +326,6 @@ permission, and the ownership is not this script's to change.
 
 The trade-off is recorded in
 [ADR 0007](decisions/0007-leave-pre-existing-apps-unadopted-by-default.md). Until you opt in, a
-skipped app is not on Homebrew's books: `brew bundle check` lists it as missing, and the `binary`
-link Homebrew would have created for it (`/opt/homebrew/bin/zed`) does not exist.
+skipped app is not on Homebrew's books: `brew bundle check` lists it as missing, and the links
+Homebrew would have created for it — Ghostty's man pages and shell completions under
+`/opt/homebrew` — do not exist.

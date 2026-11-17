@@ -24,10 +24,7 @@ brew "docker-compose"     # `docker compose` plugin; found through cliPluginsExt
 brew "docker-buildx"      # BuildKit builder plugin; without it `docker build` uses the deprecated legacy builder
 
 cask "ghostty"
-cask "zed"
-cask "font-symbols-only-nerd-font"  # Yazi icons in Zed's terminal; Ghostty has them built in
 
 cask "codex"              # OpenAI Codex CLI. NOT cask "codex-app" (discontinued upstream)
-cask "copilot-cli"
 cask "antigravity-cli"    # the `agy` CLI. NOT cask "antigravity" (app) or "antigravity-ide"
 cask "grok-build"         # xAI's `grok`. NOT brew "grok" — that is an unrelated, deprecated regex tool

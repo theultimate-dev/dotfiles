@@ -27,10 +27,11 @@ docs/assets/hero.png and replace this comment with:
 - **git push that just works** — a new branch creates and tracks its remote on the first push, and
   the popular workaround that misreports your branch is explained and rejected.
 - **"Your agent finished" notifications that survive a multiplexer** — one setting that reaches
-  Claude Code in Ghostty, in [Herdr](https://herdr.dev) and in Zed's Terminal Threads.
-- **One command for the tools** — a `Brewfile` covering Ghostty, Zed, Herdr, Yazi, hunk, micro,
-  Leaf, the GitHub CLI, Colima with the Docker CLI, and four coding-agent CLIs, and a `setup.sh`
-  that installs it convergently.
+  Claude Code in Ghostty and in [Herdr](https://herdr.dev), and still rings the bell in a terminal
+  that never parses the notification sequence.
+- **One command for the tools** — a `Brewfile` covering Ghostty, Herdr, Yazi, hunk, micro, Leaf,
+  the GitHub CLI, Colima with the Docker CLI, and three coding-agent CLIs, and a `setup.sh` that
+  installs it convergently.
 - **Nothing installed over your own configuration.** Every managed file is reached through the
   tool's own include mechanism, your existing settings are preserved byte for byte, and your git
   identity is never touched.
@@ -45,7 +46,7 @@ docs/assets/hero.png and replace this comment with:
   pulls in the Xcode Command Line Tools when they are absent.
 - **git 2.37 or newer** — the push defaults are silently inert on older git. The Command Line
   Tools ship a recent enough version.
-- **Time and disk.** The `Brewfile` includes `ffmpeg`, `imagemagick` and four GUI apps; a first
+- **Time and disk.** The `Brewfile` includes `ffmpeg`, `imagemagick` and the Ghostty app; a first
   run takes a while and a few gigabytes.
 - **What gets written.** Four small files in your home directory, each backed up first. The
   [manual setup](docs/manual-setup.md#before-you-start) lists every one, and how to put it back.
@@ -89,9 +90,8 @@ to the projects.
 | [hunk](https://hunk.dev) | Read-only diff viewer with a live watch mode. Managed config, copied. |
 | [micro](https://micro-editor.github.io) | Terminal editor for quick edits beside a running agent. |
 | [Leaf](https://github.com/RivoLink/leaf) | Markdown reader; Yazi's preview and its `.md` opener. |
-| [Zed](https://zed.dev) | GUI editor. Installed; its settings stay yours. |
 | [Claude Code](https://claude.ai/code) | Anthropic's agent CLI. Installed by its own installer, deliberately not through Homebrew. |
-| [Codex](https://github.com/openai/codex), [Copilot CLI](https://docs.github.com/en/copilot/concepts/agents/about-copilot-cli), [Antigravity CLI](https://antigravity.google/product/antigravity-cli) (`agy`), [Grok Build](https://x.ai/build) | The other agent CLIs, all from the `Brewfile`. |
+| [Codex](https://github.com/openai/codex), [Antigravity CLI](https://antigravity.google/product/antigravity-cli) (`agy`), [Grok Build](https://x.ai/build) | The other agent CLIs, all from the `Brewfile`. |
 | [GitHub CLI](https://cli.github.com) | Feeds a pull request into hunk for review. |
 | [Colima](https://colima.run) | Docker's engine in a Lima VM, driven by the `docker` CLI with Compose and Buildx — no Docker Desktop. Installed and started by hand; not configured here. |
 
@@ -204,7 +204,7 @@ The split exists so that config placement never depends on the network and stays
 half-broken machine.
 
 `setup.sh` installs the daily tools via Homebrew (Ghostty, micro, hunk, Yazi and Leaf with the
-tools Yazi previews through, Zed, Herdr, Colima with the Docker CLI, and coding agent CLIs),
+tools Yazi previews through, Herdr, Colima with the Docker CLI, and coding agent CLIs),
 restores Yazi's plugins from the tracked lockfile, configures Herdr agent integrations, and
 installs the Herdr plugins pinned in `herdr/plugins.txt`.
 Re-running it is safe and convergent. An app installed by hand before is left alone and reported;
@@ -270,8 +270,7 @@ manual — see [Manual setup](docs/manual-setup.md).
   Leaf with micro one menu away, renders Markdown in its preview pane, and marks git status next
   to every file. Also: why its config is delivered through `YAZI_CONFIG_HOME` in `~/.zshenv`
   rather than a stub, why that means no machine-local override, why the Markdown rule matches the
-  file name and not the mime type, and which of your two terminals needs a Nerd Font for the
-  icons.
+  file name and not the mime type, and why Ghostty needs no Nerd Font for the icons.
 - [Git push defaults](docs/git-push-defaults.md) — why `push.autoSetupRemote = true` on its own does
   not do what everyone expects, why `branch.autoSetupMerge = simple` is the other half of it, and
   why the popular `push.default = current` workaround is worse than the problem: the push succeeds,
@@ -284,8 +283,8 @@ manual — see [Manual setup](docs/manual-setup.md).
   [Ghostty](https://ghostty.org). A multiplexer swallows the escape sequence your agent emits, so
   the terminal-side setup you already have goes quiet; this covers what to configure instead, why
   `delivery = "system"` beats the intuitive choice, and when it doesn't. Also: the one macOS toggle
-  that makes a notification stay on screen, what the badge on Ghostty's Dock icon is, and how the
-  same Claude Code setting reaches Zed's Terminal Threads.
+  that makes a notification stay on screen, what the badge on Ghostty's Dock icon is, and why the
+  same Claude Code setting also rings the bell for terminals that never parse OSC 9.
 
 ## Who is behind this
 

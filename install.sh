@@ -442,7 +442,7 @@ step "Yazi configuration"
 # Yazi has no include directive, but it reads its config directory from
 # YAZI_CONFIG_HOME. The repo directory is that directory; the export is the
 # redirect. It goes in ~/.zshenv because every zsh reads that file, login or
-# not, so a Yazi started from Ghostty, Zed's terminal or a Herdr pane sees it
+# not, so a Yazi started from Ghostty, an editor's terminal or a Herdr pane sees it
 # — and because ~/.zshrc belongs to whichever repo manages the shell.
 # zsh reads $ZDOTDIR/.zshenv when ZDOTDIR is exported, ~/.zshenv otherwise.
 ZSHENV="${ZDOTDIR:-$HOME}/.zshenv"
