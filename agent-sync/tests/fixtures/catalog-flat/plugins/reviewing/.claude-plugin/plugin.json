@@ -1,0 +1,8 @@
+{
+  "name": "reviewing",
+  "version": "0.2.0",
+  "skills": [
+    "./skills/reviewing-code-changes",
+    "./skills/reviewing-tests"
+  ]
+}

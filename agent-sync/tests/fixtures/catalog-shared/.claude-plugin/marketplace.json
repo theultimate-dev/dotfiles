@@ -1,0 +1,32 @@
+{
+  "name": "example-vendor-plugins",
+  "owner": {
+    "name": "example-vendor"
+  },
+  "plugins": [
+    {
+      "name": "editor-integration",
+      "source": "./",
+      "version": "1.2.0",
+      "skills": [
+        "./skills/editor-integration/editor-setup"
+      ]
+    },
+    {
+      "name": "linting",
+      "source": "./",
+      "version": "1.0.0",
+      "skills": [
+        "./skills/linting"
+      ]
+    },
+    {
+      "name": "formatting",
+      "source": "./",
+      "version": "1.0.0",
+      "skills": [
+        "./skills/formatting/format-code"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,28 @@
+{
+  "name": "example-skills",
+  "owner": {
+    "name": "example-org"
+  },
+  "plugins": [
+    {
+      "name": "planning",
+      "source": "./plugins/planning",
+      "description": "Planning skills."
+    },
+    {
+      "name": "reviewing",
+      "source": "./plugins/reviewing",
+      "description": "Review skills."
+    },
+    {
+      "name": "deploying",
+      "source": "./plugins/deploying",
+      "description": "Deploy skills."
+    },
+    {
+      "name": "experiments",
+      "source": "./plugins/experiments",
+      "description": "Not for use."
+    }
+  ]
+}

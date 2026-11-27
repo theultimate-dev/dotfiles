@@ -1,0 +1,86 @@
+# agent-sync manifest — copy to ~/.config/agent-sync/manifest.toml and edit.
+# This file is yours: it names your marketplaces and local paths, so it is
+# never tracked in the dotfiles repository.
+version = 1
+
+# Harnesses to act on when --only is not given. Any of "claude", "codex", "agy".
+harnesses = ["claude", "codex", "agy"]
+
+# ── Marketplaces ─────────────────────────────────────────────────────────────
+# name      must equal the "name" field of the catalog's .claude-plugin/marketplace.json;
+#           agent-sync checks it after adding and refuses a mismatch.
+# git       owner/repo or an https/ssh Git URL.
+# ref       branch or tag to follow for Git sources. Omitted: the default branch.
+# checkout  a local working tree of the same catalog, read as it is (never pulled).
+# claude / codex / agy
+#           which source that harness uses: "git", "checkout", or "none".
+#           Default: "git". "checkout" requires checkout; "git" requires git.
+# harnesses the default for this marketplace's plugins: where a plugin goes when its
+#           own [[plugin]] row does not say. Omitted: every [[plugin]] row must say.
+# plugins   "listed" (default): only the [[plugin]] rows below are managed.
+#           "all": every plugin in the catalog is managed, at the default harnesses.
+#           Use "all" for a catalog you own; in someone else's it installs plugins
+#           you have not read about. Requires harnesses.
+# exclude   plugin names that plugins = "all" leaves out.
+
+[[marketplace]]
+name      = "example-skills"
+git       = "example-org/example-skills"
+ref       = "main"
+checkout  = "~/src/example-skills"
+claude    = "checkout"   # Claude reads the working tree live while you develop it
+codex     = "git"        # Codex follows the published branch
+agy       = "checkout"   # agy gets copies of what Claude sees
+harnesses = ["claude", "codex", "agy"]
+plugins   = "all"        # a plugin added to the catalog is picked up on the next run
+exclude   = ["experiments"]
+
+[[marketplace]]
+name      = "example-vendor-plugins"
+git       = "https://github.com/example-vendor/agent-plugins.git"
+ref       = "v2.3.0"     # a released tag; agent-sync never moves it for you
+claude    = "git"
+codex     = "git"
+agy       = "none"
+harnesses = ["claude", "codex"]
+                         # plugins is "listed": only the rows below are installed
+
+# ── Plugins ─────────────────────────────────────────────────────────────────
+# id         plugin@marketplace, exactly as the harness CLIs take it.
+# harnesses  where to install it. Omitted: the marketplace's harnesses. agy receives
+#            the plugin's skills as copies, never the plugin itself.
+# agy_skills optional subset of the plugin's skills for agy. Omitted: all of them.
+#
+# In a "listed" marketplace a row enrols the plugin. In an "all" marketplace a row
+# is only needed to state an exception for one plugin.
+
+[[plugin]]
+id         = "reviewing@example-skills"
+agy_skills = ["reviewing-code-changes"]   # exception: agy gets one of its skills
+
+[[plugin]]
+id        = "deploying@example-skills"
+harnesses = ["claude", "codex"]           # exception: not copied to agy
+
+[[plugin]]
+id = "editor-integration@example-vendor-plugins"   # goes to the marketplace's harnesses
+
+# ── Loose skills, agy only ─────────────────────────────────────────────────
+# A skill that is not in any catalog. Exactly one of git / path.
+# subdir is the skill folder inside the Git source; it must hold SKILL.md.
+
+[[skill]]
+name   = "writing-release-notes"
+git    = "example-org/standalone-skills"
+ref    = "v1.0.0"
+subdir = "skills/writing-release-notes"
+
+[[skill]]
+name = "my-local-skill"
+path = "~/src/my-skills/my-local-skill"
+
+# ── Names agent-sync reports on but never manages ──────────────────────────
+# Skills installed some other way (a skills CLI, a cloud sync, by hand). They
+# are listed as "external" instead of raising a duplicate warning.
+[external]
+skills = ["find-skills"]

@@ -1,0 +1,445 @@
+#!/usr/bin/env python3
+"""agent-sync: bring agent plugins and skills up to date in every harness.
+
+Reads a per-machine manifest (default ${XDG_CONFIG_HOME:-~/.config}/agent-sync/manifest.toml),
+asks Claude Code and Codex, through their own plugin CLIs, to hold the plugins it names, copies the
+selected skills into agy's personal skills folder, and prints one report. It writes no harness
+settings file and never uninstalls anything. See docs/agent-sync.md.
+
+Standard library only. The version gate below must stay the first thing that runs, and this file
+must stay parseable by older Pythons so the gate can report.
+"""
+
+import sys
+
+
+def version_gate(info=None):
+    """Exit 4, naming the fix, on a Python without tomllib."""
+    info = tuple(sys.version_info[:2] if info is None else info[:2])
+    if info < (3, 11):
+        sys.stderr.write(
+            "agent-sync: needs Python 3.11 or newer (it reads TOML with tomllib); "
+            "this is Python %d.%d.\n"
+            "Install one (for example `brew install python@3.13`) and run agent-sync with it.\n"
+            % info)
+        sys.exit(4)
+
+
+version_gate()
+
+import argparse  # noqa: E402
+import contextlib  # noqa: E402
+import datetime  # noqa: E402
+import difflib  # noqa: E402
+import errno  # noqa: E402
+import fcntl  # noqa: E402
+import hashlib  # noqa: E402
+import json  # noqa: E402
+import os  # noqa: E402
+import re  # noqa: E402
+import shutil  # noqa: E402
+import signal  # noqa: E402
+import subprocess  # noqa: E402
+import tomllib  # noqa: E402
+from dataclasses import dataclass, field  # noqa: E402
+
+VERSION = "0.1.0"
+HARNESSES = ("claude", "codex", "agy")
+SOURCES = ("git", "checkout", "none")
+
+EXIT_OK, EXIT_FAILED, EXIT_USAGE, EXIT_HELD, EXIT_PREREQ, EXIT_INTERRUPTED = 0, 1, 2, 3, 4, 130
+
+
+class UsageError(Exception):
+    """A usage or manifest error: exit 2, nothing runs."""
+
+
+class PrereqError(Exception):
+    """A missing prerequisite: exit 4, nothing runs."""
+
+
+# ── Manifest ──────────────────────────────────────────────────────────────────────────────────
+
+TOP_KEYS = {"version", "harnesses", "marketplace", "plugin", "skill", "external"}
+MARKETPLACE_KEYS = {"name", "git", "ref", "checkout", "claude", "codex", "agy", "harnesses",
+                    "plugins", "exclude"}
+PLUGIN_KEYS = {"id", "harnesses", "agy_skills"}
+SKILL_KEYS = {"name", "git", "ref", "subdir", "path"}
+EXTERNAL_KEYS = {"skills"}
+
+GIT_SOURCE = re.compile(r"^([\w.-]+/[\w.-]+|(https?|ssh|git|file)://\S+|[\w.-]+@[\w.-]+:\S+)$")
+NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+
+
+@dataclass
+class Marketplace:
+    name: str
+    git: str = None
+    ref: str = None
+    checkout: str = None
+    source: dict = field(default_factory=dict)   # harness -> "git" | "checkout" | "none"
+    harnesses: tuple = None                        # the default for its plugins
+    plugins: str = "listed"
+    exclude: tuple = ()
+
+
+@dataclass
+class PluginRow:
+    id: str
+    name: str
+    marketplace: str
+    harnesses: tuple            # effective: its own, else the marketplace's
+    agy_skills: tuple = None
+
+
+@dataclass
+class LooseSkill:
+    name: str
+    git: str = None
+    ref: str = None
+    subdir: str = None
+    path: str = None
+
+
+@dataclass
+class Manifest:
+    path: str
+    harnesses: tuple
+    marketplaces: dict          # name -> Marketplace, in file order
+    plugins: dict               # id -> PluginRow, in file order
+    skills: list
+    external: frozenset
+
+    def harnesses_using(self, mkt):
+        """The harnesses a marketplace's plugins go to: its default plus every row's."""
+        used = set(mkt.harnesses or ())
+        for row in self.plugins.values():
+            if row.marketplace == mkt.name:
+                used.update(row.harnesses)
+        return [h for h in HARNESSES if h in used]
+
+
+def expand_path(value, where, errors):
+    path = os.path.expanduser(value)
+    if not os.path.isabs(path):
+        errors.append("%s: %r is a relative path; use an absolute path or ~/…" % (where, value))
+        return None
+    return os.path.normpath(path)
+
+
+def _strings(value, where, errors, allowed=None):
+    if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
+        errors.append("%s must be a list of strings" % where)
+        return ()
+    if len(set(value)) != len(value):
+        errors.append("%s lists a name twice" % where)
+    if allowed is not None:
+        for v in value:
+            if v not in allowed:
+                errors.append("%s: unknown harness %r (expected one of %s)"
+                              % (where, v, ", ".join(allowed)))
+        return tuple(v for v in value if v in allowed)
+    return tuple(value)
+
+
+def _string(table, key, where, errors, required=False):
+    value = table.get(key)
+    if value is None:
+        if required:
+            errors.append("%s: %s is required" % (where, key))
+        return None
+    if not isinstance(value, str) or not value:
+        errors.append("%s: %s must be a non-empty string" % (where, key))
+        return None
+    return value
+
+
+def _unknown(table, allowed, where, errors):
+    for key in table:
+        if key not in allowed:
+            errors.append("%s: unknown key %r" % (where, key))
+
+
+def _tables(doc, key, errors):
+    value = doc.get(key, [])
+    if not isinstance(value, list) or not all(isinstance(t, dict) for t in value):
+        errors.append("%s must be written as [[%s]] tables" % (key, key))
+        return []
+    return value
+
+
+def parse_manifest(text, path):
+    """Parse and validate a manifest. Raises UsageError listing every problem found."""
+    try:
+        doc = tomllib.loads(text)
+    except tomllib.TOMLDecodeError as e:
+        raise UsageError("%s: not valid TOML: %s" % (path, e))
+    errors = []
+    _unknown(doc, TOP_KEYS, "manifest", errors)
+    if doc.get("version") != 1:
+        errors.append("manifest: version must be 1 (found %r)" % (doc.get("version"),))
+    harnesses = HARNESSES
+    if "harnesses" in doc:
+        harnesses = _strings(doc["harnesses"], "harnesses", errors, HARNESSES)
+
+    marketplaces = {}
+    for i, t in enumerate(_tables(doc, "marketplace", errors), 1):
+        where = "marketplace %s" % (t.get("name") if isinstance(t.get("name"), str) else "#%d" % i)
+        _unknown(t, MARKETPLACE_KEYS, where, errors)
+        name = _string(t, "name", where, errors, required=True)
+        if name and not NAME.match(name):
+            errors.append("%s: name %r has characters a harness will not take" % (where, name))
+        if name in marketplaces:
+            errors.append("%s: declared twice" % where)
+        m = Marketplace(name=name or "#%d" % i)
+        m.git = _string(t, "git", where, errors)
+        if m.git and not GIT_SOURCE.match(m.git):
+            errors.append("%s: git %r is not owner/repo or an https/ssh Git URL" % (where, m.git))
+        m.ref = _string(t, "ref", where, errors)
+        if m.ref and not m.git:
+            errors.append("%s: ref needs git" % where)
+        checkout = _string(t, "checkout", where, errors)
+        if checkout:
+            m.checkout = expand_path(checkout, where + " checkout", errors)
+        for h in HARNESSES:
+            src = t.get(h, "git")
+            if src not in SOURCES:
+                errors.append("%s: %s must be one of %s (found %r)"
+                              % (where, h, ", ".join(SOURCES), src))
+                src = "none"
+            m.source[h] = src
+        if "harnesses" in t:
+            m.harnesses = _strings(t["harnesses"], where + " harnesses", errors, HARNESSES)
+        m.plugins = t.get("plugins", "listed")
+        if m.plugins not in ("listed", "all"):
+            errors.append('%s: plugins must be "listed" or "all" (found %r)' % (where, m.plugins))
+        if m.plugins == "all" and m.harnesses is None:
+            errors.append('%s: plugins = "all" requires harnesses' % where)
+        if "exclude" in t:
+            m.exclude = _strings(t["exclude"], where + " exclude", errors)
+            if m.plugins != "all":
+                errors.append('%s: exclude requires plugins = "all"' % where)
+        marketplaces[m.name] = m
+
+    plugins = {}
+    for i, t in enumerate(_tables(doc, "plugin", errors), 1):
+        pid = t.get("id") if isinstance(t.get("id"), str) else None
+        where = "plugin %s" % (pid or "#%d" % i)
+        _unknown(t, PLUGIN_KEYS, where, errors)
+        pid = _string(t, "id", where, errors, required=True)
+        if not pid:
+            continue
+        name, _, mname = pid.partition("@")
+        if not name or not mname or "@" in mname:
+            errors.append("%s: id must be plugin@marketplace" % where)
+            continue
+        if pid in plugins:
+            errors.append("%s: listed twice" % where)
+        m = marketplaces.get(mname)
+        if m is None:
+            errors.append("%s: marketplace %r is not declared" % (where, mname))
+            continue
+        if name in m.exclude:
+            errors.append("%s: is both excluded by marketplace %s and listed" % (where, mname))
+        if "harnesses" in t:
+            hs = _strings(t["harnesses"], where + " harnesses", errors, HARNESSES)
+        elif m.harnesses is not None:
+            hs = m.harnesses
+        else:
+            errors.append("%s: no harnesses, and marketplace %s gives no default"
+                          % (where, mname))
+            hs = ()
+        agy_skills = None
+        if "agy_skills" in t:
+            agy_skills = _strings(t["agy_skills"], where + " agy_skills", errors)
+            if "agy" not in hs:
+                errors.append("%s: agy_skills given, but its harnesses omit agy" % where)
+        plugins[pid] = PluginRow(id=pid, name=name, marketplace=mname, harnesses=tuple(hs),
+                                 agy_skills=agy_skills)
+
+    skills = []
+    seen = set()
+    for i, t in enumerate(_tables(doc, "skill", errors), 1):
+        sname = t.get("name") if isinstance(t.get("name"), str) else None
+        where = "skill %s" % (sname or "#%d" % i)
+        _unknown(t, SKILL_KEYS, where, errors)
+        s = LooseSkill(name=_string(t, "name", where, errors, required=True) or "#%d" % i)
+        if s.name in seen:
+            errors.append("%s: two [[skill]] entries share this name" % where)
+        seen.add(s.name)
+        if not NAME.match(s.name):
+            errors.append("%s: name is not a valid folder name" % where)
+        s.git = _string(t, "git", where, errors)
+        s.ref = _string(t, "ref", where, errors)
+        s.subdir = _string(t, "subdir", where, errors)
+        spath = _string(t, "path", where, errors)
+        if (s.git is None) == (spath is None):
+            errors.append("%s: give exactly one of git or path" % where)
+        if s.git and not GIT_SOURCE.match(s.git):
+            errors.append("%s: git %r is not owner/repo or an https/ssh Git URL" % (where, s.git))
+        if spath:
+            s.path = expand_path(spath, where + " path", errors)
+        if spath and (s.ref or s.subdir):
+            errors.append("%s: ref and subdir go with git, not path" % where)
+        if s.subdir and (os.path.isabs(s.subdir) or ".." in s.subdir.split("/")):
+            errors.append("%s: subdir must be a path inside the repository" % where)
+        skills.append(s)
+
+    external = doc.get("external", {})
+    if not isinstance(external, dict):
+        errors.append("external must be a table")
+        external = {}
+    _unknown(external, EXTERNAL_KEYS, "external", errors)
+    ext = _strings(external.get("skills", []), "external skills", errors)
+
+    manifest = Manifest(path=path, harnesses=tuple(harnesses), marketplaces=marketplaces,
+                        plugins=plugins, skills=skills, external=frozenset(ext))
+    for m in marketplaces.values():
+        for h in m.harnesses or ():
+            if m.source[h] == "none":
+                errors.append("marketplace %s: harnesses names %s, whose source is none"
+                              % (m.name, h))
+        for h in manifest.harnesses_using(m):
+            src = m.source[h]
+            if src == "git" and not m.git:
+                errors.append('marketplace %s: %s uses "git" (the default) but no git is given'
+                              % (m.name, h))
+            if src == "checkout" and not m.checkout:
+                errors.append('marketplace %s: %s = "checkout" requires checkout' % (m.name, h))
+    for row in plugins.values():
+        m = marketplaces[row.marketplace]
+        for h in row.harnesses:
+            if m.source[h] == "none" and not (m.harnesses and h in m.harnesses):
+                errors.append("plugin %s: goes to %s, but marketplace %s has %s = \"none\""
+                              % (row.id, h, m.name, h))
+    if errors:
+        raise UsageError("\n".join("%s: %s" % (tilde(path), e) for e in errors))
+    return manifest
+
+
+def check_manifest_paths(manifest, run_harnesses):
+    """A checkout or path that does not exist is an error only where this run uses it."""
+    errors = []
+    for m in manifest.marketplaces.values():
+        for h in manifest.harnesses_using(m):
+            if h in run_harnesses and m.source[h] == "checkout" and not os.path.isdir(m.checkout):
+                errors.append("marketplace %s: checkout %s does not exist (used by %s)"
+                              % (m.name, tilde(m.checkout), h))
+                break
+    if "agy" in run_harnesses:
+        for s in manifest.skills:
+            if s.path and not os.path.isdir(s.path):
+                errors.append("skill %s: path %s does not exist" % (s.name, tilde(s.path)))
+    if errors:
+        raise UsageError("\n".join("%s: %s" % (tilde(manifest.path), e) for e in errors))
+
+
+def load_manifest(path):
+    try:
+        with open(path, "rb") as f:
+            text = f.read().decode("utf-8")
+    except FileNotFoundError:
+        raise UsageError("no manifest at %s; copy agent-sync/manifest.example.toml there and "
+                         "edit it, or pass --manifest <path>" % tilde(path))
+    except (OSError, UnicodeDecodeError) as e:
+        raise UsageError("cannot read manifest %s: %s" % (path, e))
+    return parse_manifest(text, path)
+
+
+# ── Paths ─────────────────────────────────────────────────────────────────────────────────────
+
+def home():
+    return os.path.expanduser("~")
+
+
+def tilde(path):
+    """A path as the report shows it: the home directory as ~."""
+    h = home().rstrip("/")
+    if path == h:
+        return "~"
+    if path.startswith(h + "/"):
+        return "~" + path[len(h):]
+    return path
+
+
+def xdg(var, default):
+    value = os.environ.get(var)
+    return value if value and os.path.isabs(value) else os.path.join(home(), default)
+
+
+def default_manifest_path():
+    return os.path.join(xdg("XDG_CONFIG_HOME", ".config"), "agent-sync", "manifest.toml")
+
+
+# ── Command line ──────────────────────────────────────────────────────────────────────────────
+
+def accept_command(value):
+    pid, sep, sha = value.partition("=")
+    if not sep or "@" not in pid or not re.match(r"^[0-9a-f]{64}$", sha):
+        raise argparse.ArgumentTypeError("expected <plugin>@<marketplace>=<sha256>, got %r"
+                                         % value)
+    return pid, sha
+
+
+def only_list(value):
+    names = [v.strip() for v in value.split(",") if v.strip()]
+    bad = [n for n in names if n not in HARNESSES]
+    if bad or not names:
+        raise argparse.ArgumentTypeError("--only takes a comma list of %s" % ", ".join(HARNESSES))
+    return tuple(h for h in HARNESSES if h in names)
+
+
+def parse_args(argv):
+    if argv[:1] == ["cleanup"]:
+        p = argparse.ArgumentParser(prog="agent-sync cleanup",
+                                    description="Archive flat skill copies that shadow a plugin.")
+        p.add_argument("--dry-run", action="store_true", help="list the candidates and stop")
+        p.add_argument("--yes", nargs="+", metavar="NAME", default=[],
+                       help="archive exactly these candidates without asking")
+        p.add_argument("--restore", metavar="TIMESTAMP", help="undo one cleanup run")
+        p.add_argument("--manifest", metavar="PATH")
+        args = p.parse_args(argv[1:])
+        args.command = "cleanup"
+        return args
+    p = argparse.ArgumentParser(
+        prog="agent-sync",
+        description="Bring agent plugins and skills up to date in every harness.",
+        epilog="agent-sync cleanup [--dry-run] [--yes NAME…] [--restore TIMESTAMP]: the one-time "
+               "cleanup of flat copies that shadow a plugin.")
+    p.add_argument("--version", action="version", version="agent-sync " + VERSION)
+    mode = p.add_mutually_exclusive_group()
+    mode.add_argument("--dry-run", action="store_true", help="print the plan; write nothing")
+    mode.add_argument("--check", action="store_true", help="report drift; exit 1 if any")
+    p.add_argument("--only", type=only_list, metavar="H[,H…]", help="restrict to these harnesses")
+    p.add_argument("--json", action="store_true", help="the report as JSON lines")
+    p.add_argument("--accept-command", type=accept_command, action="append", default=[],
+                   metavar="PLUGIN@MKT=SHA256", help="accept one declared command (repeatable)")
+    p.add_argument("--adopt", action="append", default=[], metavar="SKILL",
+                   help="take over a foreign or edited agy folder, archiving it (repeatable)")
+    p.add_argument("--prune", action="store_true", help="archive owned agy skills that left "
+                                                        "the manifest")
+    p.add_argument("--repair", action="store_true", help="reinstall Codex plugins whose cache "
+                                                         "is stale")
+    p.add_argument("--manifest", metavar="PATH")
+    args = p.parse_args(argv)
+    args.command = "sync"
+    return args
+
+
+def main(argv=None):
+    argv = sys.argv[1:] if argv is None else argv
+    args = parse_args(argv)
+    path = args.manifest or default_manifest_path()
+    try:
+        manifest = load_manifest(os.path.abspath(os.path.expanduser(path)))
+        run_harnesses = getattr(args, "only", None) or manifest.harnesses
+        check_manifest_paths(manifest, run_harnesses)
+    except UsageError as e:
+        sys.stderr.write("agent-sync: %s\n" % e)
+        return EXIT_USAGE
+    sys.stdout.write("agent-sync %s · manifest %s is valid\n" % (VERSION, tilde(manifest.path)))
+    return EXIT_OK
+
+
+if __name__ == "__main__":
+    sys.exit(main())
