@@ -89,21 +89,27 @@ command runs: in the manifest it exits 2, and in a catalog it is that plugin's `
 | `~/.local/state/agent-sync/lock` | One run at a time; holds the running PID |
 | `~/.local/state/agent-sync/last-run.log` | Every command the last run executed, with exit codes; credentials in URLs are redacted |
 | `~/.local/state/agent-sync/archive/<timestamp>/` | Everything agent-sync ever moved out of the way. Nothing is deleted |
-| `~/.cache/agent-sync/sources/` | agent-sync's own clone of each Git source, used to read catalogs and to copy skills for agy: `<marketplace>/` for a marketplace, `+skill-<name>/` for a `[[skill]]`, so the two never share a folder; safe to delete |
+| `~/.cache/agent-sync/sources/` | agent-sync's own clone of each Git source, used to read catalogs and to copy skills for agy. Each folder is named by the SHA-256 of what was asked for: the kind of source, its URL and its ref, never a name, so no two sources share one on any volume; safe to delete |
 
 `$XDG_STATE_HOME` and `$XDG_CACHE_HOME` are honoured. `CLAUDE_CONFIG_DIR` and `CODEX_HOME` pass
-through to the harnesses untouched, so the harness homes are whatever those variables say.
+through to the harnesses untouched, so the harness homes are whatever those variables say. A
+harness home may also be a symlink, set up on purpose to point at another profile. agent-sync
+neither checks nor refuses that: those homes are written only by their own CLIs, and cleanup moves
+folders in them where the link leads.
+
+**Keep the state directory on the home volume.** Every move agent-sync makes is a single rename,
+into or out of the archive under `$XDG_STATE_HOME`. A rename cannot cross volumes, and agent-sync
+never falls back to copying and deleting, so nothing can be left half-removed. When the archive is
+on another volume, the item is `failed`, the row names both paths, and nothing has moved.
 
 agent-sync writes nothing through a symlink. Every folder on the way to a file it writes — the
 state folder, the lock, the archive, the Git cache, agy's skills folder and the staging folders
 beside it — is checked component by component, and a link anywhere is an error naming it. A move
-checks both ends at the moment it happens: the chain it moves from and the chain it moves to.
-A move never replaces anything. It claims its destination as a new, empty folder and fails if
-the name is taken. A move across volumes copies into a staging folder of its own first, and on
-failure removes only that folder. Temp files are created exclusively, so a name planted in
-advance redirects nothing. Git runs with the
-cache's repository and work tree named explicitly, and with `GIT_DIR` and the other
-repository-selection variables removed from its environment.
+checks agent-sync's end of it at the moment it happens. A move never replaces anything: it claims
+its destination as a new, empty folder and fails if the name is taken. Temp files are created
+exclusively, so a name planted in advance redirects nothing. Git runs with the cache's repository
+and work tree named explicitly, and with `GIT_DIR` and the other repository-selection variables
+removed from its environment.
 
 The state file is read only after the lock is held, and it is validated before anything uses it.
 Folder names must be plain names, every field must have the type it should, and cleanup records
@@ -115,7 +121,9 @@ aside. A skill whose folder name agent-sync could not record is never copied, an
 If the state file cannot be written, for example because the disk is full, nothing is lost
 silently. A `failed` row names the state file and what went unrecorded, the report still prints,
 and the run exits 1. A copy that went unrecorded is picked up on the next run: an agy folder that
-already holds exactly what would be copied is recorded again rather than held.
+already holds exactly what would be copied is recorded again rather than held. A first copy, which
+had no record yet, is `held` like any folder agent-sync did not create, and `--adopt <name>` takes
+it over.
 
 ## The report
 
@@ -204,8 +212,9 @@ carry on.
 It never compares against agent-sync's own cache, which the check's fetch has just moved. A
 marketplace has no applied record after a first run on a machine set up by hand, or after you
 move the state file aside. It stays `unverifiable` until a run records one. Claude Code's plugins
-each carry their own applied revision. A plugin whose update was held or failed stays behind its
-marketplace, and `--check` keeps reporting it until a run applies it.
+each carry their own applied revision, never their marketplace's. A plugin agent-sync has not yet
+applied, including one whose update was held or failed, has none, and `--check` reports it
+`unchecked` until a run applies it.
 
 ## Codex stale cache
 
@@ -223,9 +232,10 @@ upgrade that ran while the ref looked unmoved, or a `checkout` source edited aft
 
 agent-sync therefore checks rather than trusts. After the refresh, it compares each managed
 plugin's skills in the Codex cache with the same plugin in the source, at the revision just
-applied. It compares the skills each side selects first, working them out the same way for the
-cache as for the source. A skill removed, renamed, or dropped from the plugin's `skills` list
-upstream but still in the cache is therefore caught. Then it compares the bytes of each. Equal is
+applied, and it decides on what the cache physically holds. A skill the source selects that the
+cache lacks is `stale`. So are different skill folders, a different `plugin.json` (it decides
+which skills Codex loads from the cache), and different bytes in any selected skill. That catches
+a skill added, removed, renamed, or dropped from the plugin's `skills` list upstream. Equal is
 `unchanged … cache digest matches <revision>`; different is `stale`. The cache layout is not a
 documented interface, so a layout agent-sync does not recognise is `unverifiable`, never a
 failure and never a repair.
@@ -354,10 +364,12 @@ quit, so a script that cannot answer archives nothing; non-interactive use names
 "Identical" means identical to the tree the harness loads: Claude Code's install or checkout
 folder, or Codex's cache at the installed version. The catalog does not count, since it may have
 moved on. When that tree cannot be found, the comparison is shown against the catalog, and the
-copy never counts as identical, so "all remaining identical" passes over it. A candidate that is
-itself a symlink is listed and never archived, because moving a relative link changes what it
-points at. The skills CLI's lock file, `~/.agents/.skill-lock.json`, may have an entry for the
-name. A `provenance` line then says so; cleanup reads that file and never writes it.
+copy never counts as identical, so "all remaining identical" passes over it. "Identical" also
+needs both trees actually digested: a copy with a file that cannot be read is equal to nothing. A
+candidate that is a symlink, or holds one at any depth, is listed and never archived by any
+answer, because moving a relative link changes what it points at. The skills CLI's lock file,
+`~/.agents/.skill-lock.json`, may have an entry for the name. A `provenance` line then says so;
+cleanup reads that file and never writes it.
 
 The copy is read again when you answer. If it changed while the question was open, it is shown
 again and asked about again; with `--yes`, it is not archived and cleanup exits 1. A yes is a
@@ -386,20 +398,19 @@ Each copy is careful about what is already there:
   digested again, and swapped in with two renames: the old copy into the archive, the new one into
   place. A failure rolls back. The swap and the state record of the new copy are one protected
   step. Ctrl-C waits for both, so the next run never mistakes agent-sync's own copy for a hand
-  edit. When the archive is on another volume, the old copy goes through a folder beside agy's.
-  If it cannot then be copied to the archive, the new copy stays in place and the row names
-  where the old one is.
+  edit. An archive on another volume fails the skill before anything moves; see
+  [Keep the state directory on the home volume](#where-its-own-files-live).
 - **Owned, or left alone.** agent-sync records every folder it creates, with its digest. A folder
   it did not create is `held` and never replaced without `--adopt <name>`, which archives it
   first. A folder it created but that has since been edited is held the same way, so an edit made
   inside agy is not lost to the next run.
 - **Removed only on request, and only when certain.** A skill that leaves the manifest is reported
-  `orphaned`, and `--prune` archives it. While any marketplace or plugin selection could not be
-  read this run, prune archives nothing and names what it could not read. That covers a failed
-  fetch, a catalog not fetched yet, a plugin or `agy_skills` subset that failed, and a skill folder
-  that became a symlink, dangling or not. An unreadable selection says nothing about what was
-  removed. A copy's record follows the source that selects it now, so moving a skill to another
-  marketplace with the same bytes moves its ownership too.
+  `orphaned`, and `--prune` archives it — but only in a run that read every agy source, catalog,
+  `plugin.json`, declared path and skill listing without a single error. Any error skips prune
+  for the whole run, with one `skipped` row naming what could not be read: a failed fetch, a
+  catalog not fetched yet, a malformed `plugin.json`, a declared path that is missing, an
+  `agy_skills` name the plugin lacks, or a symlink anywhere in a catalog, dangling or not. An
+  unreadable selection says nothing about what was removed. The skills that were read still copy.
 - **Names compare the way the volume compares them.** macOS volumes are usually
   case-insensitive, so `Review-note` and `review-note` are one folder. agent-sync probes the
   destination volume and, if it ignores case, folds names for ownership, collisions and prune. A

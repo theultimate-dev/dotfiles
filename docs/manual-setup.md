@@ -371,8 +371,10 @@ skill reaches a harness once: the cleanup at the end archives the older flat cop
 plugin.
 
 This step needs step 2 done, and a Python 3.11 or newer on `$PATH` as `python3`; step 1's
-`Brewfile` installs one. Check with `python3 --version`. A `scripts/` entry on `$PATH` is still
-planned, so every command below calls the script by its path.
+`Brewfile` installs one. Check with `python3 --version`. If you set `XDG_STATE_HOME`, keep it on
+the same volume as your home folder: agent-sync only ever renames into its archive there, and an
+item whose archive is on another volume fails with nothing moved. A `scripts/` entry on `$PATH` is
+still planned, so every command below calls the script by its path.
 
 **Do this.** First, the manifest. It is yours, untracked, and starts as a copy of the commented
 example; the copy refuses to overwrite one that is already there:

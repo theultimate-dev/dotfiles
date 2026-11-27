@@ -7,6 +7,7 @@ network can be reached: PATH holds the fakes only.
 """
 
 import contextlib
+import hashlib
 import importlib.machinery
 import importlib.util
 import json
@@ -198,6 +199,12 @@ def rows(result):
     """The JSON report rows of a `--json` run, and its summary line."""
     lines = [json.loads(line) for line in result.stdout.splitlines() if line.startswith("{")]
     return [r for r in lines if "result" in r], next((r for r in lines if "summary" in r), None)
+
+
+def cache_name(kind, url, ref=None):
+    """The folder agent-sync caches a Git source in: named by the request, kind, URL and ref,
+    never by a name, so no two sources share one on any volume (spec §10)."""
+    return hashlib.sha256(("%s\n%s\n%s" % (kind, url, ref or "")).encode()).hexdigest()
 
 
 def find(rows_, harness=None, item=None, result=None):

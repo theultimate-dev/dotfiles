@@ -71,7 +71,6 @@ class InstallTree(support.SandboxCase, unittest.TestCase):
         self.config = os.path.join(self.sb.home, ".gemini", "config")
         self.dest = os.path.join(self.config, "skills", "s")
         self.stage = os.path.join(self.config, ".agent-sync-stage")
-        self.old = os.path.join(self.config, ".agent-sync-old")
         self.archive = os.path.join(self.sb.state_dir, "archive", "T", "agy", "s")
         self.src = make_tree(os.path.join(self.sb.root, "src"), {"SKILL.md": "new",
                                                                   "ref/a.md": "a"})
@@ -79,7 +78,7 @@ class InstallTree(support.SandboxCase, unittest.TestCase):
         self.addCleanup(setattr, A, "_rename", self.rename)
 
     def install(self):
-        return A.install_tree(self.src, self.dest, self.stage, self.archive, self.old)
+        return A.install_tree(self.src, self.dest, self.stage, self.archive)
 
     def test_first_copy(self):
         got = self.install()
@@ -143,23 +142,22 @@ class InstallTree(support.SandboxCase, unittest.TestCase):
         self.assertIn(self.stage, msg)
         self.assertEqual(read_tree(self.archive), {"SKILL.md": "old"}, "nothing is lost")
 
-    def test_archive_on_another_filesystem_goes_through_the_old_folder(self):
+    def test_an_archive_on_another_volume_fails_the_copy_before_anything_moves(self):
         make_tree(self.dest, {"SKILL.md": "old"})
-        seen = []
 
         def cross_device(a, b):
-            seen.append(b)
-            # The archive is another volume: only a rename from beside it stays on it.
-            if b == self.archive and os.path.dirname(a) != os.path.dirname(b):
+            if b == self.archive:
                 raise OSError(18, "Cross-device link")  # EXDEV
             return self.rename(a, b)
 
         A._rename = cross_device
-        self.install()
-        self.assertTrue(any(p.startswith(self.old + os.sep) for p in seen))
-        self.assertEqual(read_tree(self.archive), {"SKILL.md": "old"})
-        self.assertEqual(read_tree(self.dest)["SKILL.md"], "new")
-        self.assertFalse(os.path.exists(self.old))
+        with self.assertRaises(A.TreeError) as cm:
+            self.install()
+        self.assertIn("different volumes", str(cm.exception))
+        self.assertIn("XDG_STATE_HOME", str(cm.exception))
+        self.assertEqual(read_tree(self.dest), {"SKILL.md": "old"})
+        self.assertFalse(os.path.exists(self.archive))
+        self.assertFalse(os.path.exists(self.stage))
 
     def test_sigint_during_the_swap_leaves_old_or_new_never_neither(self):
         make_tree(self.dest, {"SKILL.md": "old"})

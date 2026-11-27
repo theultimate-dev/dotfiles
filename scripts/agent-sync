@@ -191,9 +191,8 @@ def parse_manifest(text, path):
         name = _string(t, "name", where, errors, required=True)
         if name and not NAME.match(name):
             errors.append("%s: name %r has characters a harness will not take" % (where, name))
-        if name and name.lower() in {k.lower() for k in marketplaces}:
-            errors.append("%s: declared twice (compared without case: on macOS both would share "
-                          "one cache folder)" % where)
+        if name in marketplaces:
+            errors.append("%s: declared twice" % where)
         m = Marketplace(name=name or "#%d" % i)
         m.git = _string(t, "git", where, errors)
         if m.git and not GIT_SOURCE.match(m.git):
@@ -401,7 +400,6 @@ class Paths:
         self.gemini_config = os.path.join(self.home, ".gemini", "config")
         self.agy_skills = os.path.join(self.gemini_config, "skills")
         self.agy_stage = os.path.join(self.gemini_config, ".agent-sync-stage")
-        self.agy_old = os.path.join(self.gemini_config, ".agent-sync-old")
         self.agy_builtin = os.path.join(self.home, ".gemini", "antigravity-cli", "builtin",
                                         "skills")
 
@@ -760,12 +758,12 @@ def remove_if_empty(path):
         os.rmdir(path)
 
 
-def install_tree(src, dest, stage_root, archive_dest, old_root):
+def install_tree(src, dest, stage_root, archive_dest):
     """Copy src to dest through a staged, verified copy and two renames (spec §6 steps 4-6).
 
-    Returns {"digest", "files", "archived", "note"}; raises TreeError, after rolling back, if
-    the copy cannot be put in place, naming every path that holds something. Every directory
-    written through is checked for symlinks first."""
+    Returns {"digest", "files", "archived"}; raises TreeError, after rolling back, if the copy
+    cannot be put in place, naming every path that holds something. Every directory written
+    through is checked for symlinks first."""
     name = os.path.basename(dest)
     try:
         digest, files = digest_tree(src)
@@ -784,72 +782,54 @@ def install_tree(src, dest, stage_root, archive_dest, old_root):
         shutil.rmtree(stage, ignore_errors=True)
         remove_if_empty(stage_root)
         raise TreeError(str(e))
-    archived, note = None, ""
+    archived = None
+
+    def drop_stage():
+        shutil.rmtree(stage, ignore_errors=True)
+        remove_if_empty(stage_root)
+
     with critical():
-        moved = None
         if os.path.lexists(dest):
-            ensure_dir(os.path.dirname(archive_dest))
-            archive_dest = unique(archive_dest)
             try:
-                claim(archive_dest)     # onto an empty folder of its own, never another's
-                _rename(dest, archive_dest)
-                moved = archive_dest
-            except (OSError, TreeError) as e:
-                if not isinstance(e, TreeError):
-                    remove_if_empty(archive_dest)
-                if getattr(e, "errno", None) != errno.EXDEV:
-                    shutil.rmtree(stage, ignore_errors=True)
-                    raise TreeError("cannot move %s aside: %s" % (tilde(dest), e))
-                moved = os.path.join(ensure_dir(old_root), "%s.%d" % (name, os.getpid()))
-                _rename(dest, moved)
+                ensure_dir(os.path.dirname(archive_dest))
+                archived = relocate(dest, unique(archive_dest))
+            except TreeError:
+                drop_stage()
+                raise
         try:
             _rename(stage, dest)
         except OSError as e:
-            if moved is None:
-                shutil.rmtree(stage, ignore_errors=True)
+            if archived is None:
+                drop_stage()
                 raise TreeError("cannot put %s in place: %s" % (tilde(dest), e))
             try:
-                _rename(moved, dest)
+                _rename(archived, dest)     # back where it came from, on the same volume
             except OSError as e2:
                 raise TreeError("cannot put the new copy in place (%s) or restore the old one "
                                 "(%s): the old copy is at %s, the new one at %s"
-                                % (e, e2, moved, stage))
-            shutil.rmtree(stage, ignore_errors=True)
+                                % (e, e2, archived, stage))
+            drop_stage()
             raise TreeError("cannot put the new copy in place (%s); the previous copy is "
                             "restored" % e)
-        archived = moved if moved == archive_dest else None
-        if moved is not None and moved != archive_dest:
-            try:
-                transfer(moved, archive_dest)
-                archived = archive_dest
-                remove_if_empty(old_root)
-            except (OSError, TreeError) as e:
-                note = "; the previous copy could not reach the archive (%s) and is at %s" \
-                    % (e, tilde(moved))
     remove_if_empty(stage_root)
-    return {"digest": digest, "files": files, "archived": archived, "note": note}
+    return {"digest": digest, "files": files, "archived": archived}
 
 
-def transfer(src, dst):
-    """Move a tree to another filesystem without recreating a symlink there (Rule #1). The copy
-    goes into a staging folder this call creates; it is published to dst only if dst does not
-    exist, and on failure only that staging folder is removed (spec §10)."""
-    for d, dirs, names in os.walk(src):
-        if any(os.path.islink(os.path.join(d, n)) for n in dirs + names):
-            raise TreeError("%s holds a symlink, which a copy would recreate" % tilde(src))
-    stage = tempfile.mkdtemp(dir=os.path.dirname(dst), prefix=".agent-sync-partial.")
+def relocate(src, dst):
+    """The one way agent-sync moves a folder: a single rename onto an empty folder it has just
+    claimed, so nothing is replaced. Never a copy: across volumes the move fails and nothing is
+    touched (spec §10, no cross-volume moves). Returns dst; raises TreeError."""
+    claim(dst)
     try:
-        shutil.copytree(src, stage, dirs_exist_ok=True)
-        claim(dst)
-        try:
-            _rename(stage, dst)         # onto the empty folder just claimed, nobody else's
-        except OSError:
-            remove_if_empty(dst)
-            raise
-    except BaseException:
-        shutil.rmtree(stage, ignore_errors=True)
-        raise
-    shutil.rmtree(src)
+        _rename(src, dst)
+    except OSError as e:
+        remove_if_empty(dst)
+        if e.errno == errno.EXDEV:
+            raise TreeError("cannot move %s to %s: they are on different volumes, and "
+                            "agent-sync never copies a folder across volumes; keep "
+                            "XDG_STATE_HOME on the home volume" % (tilde(src), tilde(dst)))
+        raise TreeError("cannot move %s to %s: %s" % (tilde(src), tilde(dst), e))
+    return dst
 
 
 def claim(path):
@@ -861,34 +841,27 @@ def claim(path):
                         % tilde(path))
 
 
-def move_exact(src, dst):
-    """Rename a folder to exactly dst: both chains are checked for symlinks at the move, dst
-    must not exist, and nothing is ever written under another name (spec §10)."""
-    ensure_dir(os.path.dirname(src), create=False)
-    ensure_dir(os.path.dirname(dst))
+def move_exact(src, dst, harness_side=None, verify=None):
+    """Rename a folder to exactly dst. The chain on agent-sync's side is checked for symlinks at
+    the move; the side in a harness's folder ("src" or "dst") is that harness's to point where
+    it likes (spec §10, whose symlinks). dst must not exist."""
+    if harness_side != "src":
+        ensure_dir(os.path.dirname(src), create=False)
+    if harness_side == "dst":
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+    else:
+        ensure_dir(os.path.dirname(dst))
     if os.path.islink(src) or not os.path.isdir(src):
         raise TreeError("%s is a symlink or not a folder; not moved" % tilde(src))
-    claim(dst)
+    if verify:
+        verify()        # the last look before the rename (spec §10, a move is checked)
     with critical():
-        try:
-            _rename(src, dst)
-        except OSError as e:
-            remove_if_empty(dst)
-            if e.errno != errno.EXDEV:
-                raise
-            transfer(src, dst)
-    return dst
+        return relocate(src, dst)
 
 
-def archive_tree(path, archive_dest):
+def archive_tree(path, archive_dest, harness_side=None, verify=None):
     """Move a folder into the archive, under the first free slot name."""
-    for _ in range(100):
-        try:
-            return move_exact(path, unique(archive_dest))
-        except TreeError as e:
-            if "appeared while" not in str(e):
-                raise
-    raise TreeError("no free archive slot for %s" % tilde(archive_dest))
+    return move_exact(path, unique(archive_dest), harness_side, verify)
 
 
 # ── Report ────────────────────────────────────────────────────────────────────────────────────
@@ -1217,7 +1190,6 @@ class Source:
     dirty: bool = False
     before: str = None        # git: the cache's revision before this run fetched
     error: str = None
-    unchecked: bool = False   # dry run with no cache yet
     reported: bool = False    # its error is already in the report
 
     def label(self):
@@ -1265,15 +1237,20 @@ def checkout_source(ctx, path):
     return ctx.sources[key]
 
 
-def git_source(ctx, kind, name, url, ref):
+def cache_name(kind, url, ref):
+    """A Git source's cache folder, named by the request rather than by any name, so no two
+    sources share one, whatever the volume's case rules (spec §10)."""
+    return hashlib.sha256(("%s\n%s\n%s" % (kind, url, ref or "")).encode()).hexdigest()
+
+
+def git_source(ctx, kind, url, ref):
     """agent-sync's own clone of a Git source, moved to `ref` (never a harness's cache). Every
     command names the repository and worktree explicitly, and links are checked out as plain
-    files (core.symlinks=false), so no tracked symlink lands in $HOME (spec §6). A marketplace
-    and a loose skill never share a folder: a skill's starts with "+", which no name can."""
-    key = (kind, name)
+    files (core.symlinks=false), so no tracked symlink lands in $HOME (spec §6)."""
+    key = cache_name(kind, url, ref)
     if key in ctx.sources:
         return ctx.sources[key]
-    d = os.path.join(ctx.paths.sources, name if kind == "marketplace" else "+skill-" + name)
+    d = os.path.join(ctx.paths.sources, key)
     git = ["git", "--git-dir", os.path.join(d, ".git"), "--work-tree", d,
            "-c", "core.symlinks=false"]
     run = lambda *a: ctx.runner.run(git + list(a), GIT_TIMEOUT)  # noqa: E731
@@ -1289,22 +1266,13 @@ def git_source(ctx, kind, name, url, ref):
         r = run("rev-parse", "HEAD")
         src.before = r.stdout.strip() if r.ok else None
     if not ctx.fetch:
-        if src.before:      # a cache cloned from another URL says nothing about this one
-            origin = run("remote", "get-url", "origin")
-            if not origin.ok or origin.stdout.strip() != url:
-                src.before = None
         src.tree, src.revision = (d, src.before) if src.before else (None, None)
-        src.unchecked = src.before is None
         return src
     try:
         ensure_dir(ctx.paths.sources)
     except TreeError as e:
         src.error = str(e)
         return src
-    if os.path.isdir(d):
-        origin = run("remote", "get-url", "origin")
-        if not origin.ok or origin.stdout.strip() != url:
-            shutil.rmtree(d)
     if not os.path.isdir(d):
         r = ctx.runner.run(["git", "-c", "core.symlinks=false", "clone", "--no-checkout", "--",
                             url, d], GIT_TIMEOUT)
@@ -1325,7 +1293,7 @@ def git_source(ctx, kind, name, url, ref):
 def marketplace_source(ctx, m, harness):
     if m.source[harness] == "checkout":
         return checkout_source(ctx, m.checkout)
-    return git_source(ctx, "marketplace", m.name, git_url(m.git), m.ref)
+    return git_source(ctx, "marketplace", git_url(m.git), m.ref)
 
 
 # ── Catalog: plugins, enrolment and skills (spec §3, §6) ──────────────────────────────────────
@@ -1395,29 +1363,31 @@ class Catalog:
 
 def skill_folders(pdir, declared, inside):
     """The skill folders a plugin selects: the declared `skills` paths (catalog entry, else its
-    plugin.json), defaulting to every <plugin>/skills/*/SKILL.md. A symlink in a folder
-    searched is an error, never a silent omission, since a dropped skill reads as a removal
-    to prune (spec §6). Used for a source and for a Codex cache alike."""
-    if declared is None:
+    plugin.json), defaulting to every <plugin>/skills/*/SKILL.md. Only a plugin.json that does
+    not exist means "no declaration"; one that cannot be read is an error, since a selection
+    read wrongly looks like a removal to prune. Links are never read; the catalog walk in
+    agy_selection reports them (spec §10)."""
+    descriptor = os.path.join(pdir, DESCRIPTOR)
+    if declared is None and os.path.lexists(descriptor):
         try:
-            with open(os.path.join(pdir, ".claude-plugin", "plugin.json")) as f:
-                declared = json.load(f).get("skills")
-        except (OSError, ValueError, AttributeError):
-            declared = None
+            with open(descriptor) as f:
+                doc = json.load(f)
+        except (OSError, ValueError) as e:
+            raise CatalogError("its plugin.json cannot be read: %s" % e)
+        if not isinstance(doc, dict):
+            raise CatalogError("its plugin.json is not a JSON object")
+        declared = doc.get("skills")
     if declared is not None and not isinstance(declared, (str, list)):
         raise CatalogError("its skills field is neither a path nor a list of paths")
 
     def listing(base):
-        out = []
-        for n in sorted(os.listdir(base)):
-            if os.path.islink(os.path.join(base, n)):
-                raise CatalogError("%s is a symlink; nothing is read through it"
-                                   % os.path.relpath(os.path.join(base, n), pdir))
-            out.append(os.path.join(base, n))
-        return out
+        return [os.path.join(base, n) for n in sorted(os.listdir(base))
+                if not os.path.islink(os.path.join(base, n))]
 
     if declared is None:
         base = os.path.join(pdir, "skills")
+        if os.path.islink(base):
+            raise CatalogError("its skills folder is a symlink; nothing is read through it")
         dirs = listing(base) if os.path.isdir(base) else []
     else:
         dirs = []
@@ -1824,7 +1794,6 @@ def sync_claude(ctx):
                                    "fetched yet; its plugins are listed by --check or a run")
                 continue
             enrolled, failed = enrol(ctx, m, h, cat)
-            before = (state.get(m.name) or {}).get("revision")
             proceed = claude_marketplace(ctx, m, src, markets.get(m.name), state)
             ctx.save_state()
         except ITEM_ERRORS as e:
@@ -1832,8 +1801,8 @@ def sync_claude(ctx):
             unknown.add(m.name)
             continue
         managed.update(e.id for e in enrolled)
-        work.append((m, src, cat, enrolled, failed, proceed, before))
-    for m, src, cat, enrolled, failed, proceed, before in work:
+        work.append((m, src, cat, enrolled, failed, proceed))
+    for m, src, cat, enrolled, failed, proceed in work:
         for pid, why in failed:
             ctx.report.add(h, pid, "failed", why)
         if not proceed:
@@ -1841,9 +1810,9 @@ def sync_claude(ctx):
             continue
         record = state.get(m.name) or {}
         for e in enrolled:
-            # Each plugin's own applied revision: a held or failed update leaves it behind its
-            # marketplace, and --check keeps reporting it (spec §8).
-            last = record["plugins"].get(e.id) if "plugins" in record else before
+            # Each plugin's own applied revision, never its marketplace's: one never applied,
+            # or held, or failed, is unknown, and --check reports it unchecked (spec §10).
+            last = (record.get("plugins") or {}).get(e.id)
             row = claude_plugin(ctx, m, e, plugins.get(e.id), last != src.revision)
             if row is not None:
                 rows.append(row)
@@ -1851,7 +1820,7 @@ def sync_claude(ctx):
                     done.append((row, state[m.name], e.id, src.revision))
     if any(r.result in CHANGED for r in rows) and ctx.apply:
         plugins = claude_list(ctx, "plugins") or {}
-    for m, _, cat, enrolled, _, proceed, _ in work:    # after the changes: a new install counts
+    for m, _, cat, enrolled, _, proceed in work:    # after the changes: a new install counts
         if proceed:
             record_selection(ctx, h, m, cat, enrolled, plugins)
     for row in rows:
@@ -2003,26 +1972,42 @@ def skill_dirs(root):
 
 
 def codex_cache_check(ctx, m, cat, name, version):
-    """'match', 'stale' or 'unverifiable' for one installed plugin: the same skills, by name,
-    and the same bytes in each, in the cache and in the source (spec §5.2)."""
+    """'match', 'stale' or 'unverifiable' for one installed plugin, decided on the physical
+    inventory first: a skill the source selects and the cache lacks is stale, as are different
+    skill folders, a different plugin.json (it decides the cache's selection) or different
+    bytes. Unverifiable is only a layout not recognised, or a source that cannot say what it
+    selects (spec §5.2, §10)."""
     cache = os.path.join(ctx.paths.codex_home, "plugins", "cache", m.name, name, str(version))
     if not version or not os.path.isdir(cache):
         return "unverifiable"
     try:
         pdir = cat.plugin_dir(name)
-        theirs = {os.path.relpath(s.path, pdir) for s in cat.skills(name)}
-        mine = {os.path.relpath(d, cache) for d in skill_folders(
-            cache, cat.entries[name].get("skills"),
-            lambda rel: contained(cache, os.path.join(cache, rel)))}
-        if mine != theirs or skill_dirs(cache) != skill_dirs(pdir):
-            return "stale"          # a skill removed, renamed or deselected upstream
-        for rel in theirs:
-            if digest_tree(os.path.join(cache, rel))[0] != digest_tree(os.path.join(pdir,
-                                                                                    rel))[0]:
-                return "stale"
-    except (CatalogError, SymlinkError, OSError, TypeError, ValueError):
+        selected = sorted(os.path.relpath(s.path, pdir) for s in cat.skills(name))
+        theirs = {rel: digest_tree(os.path.join(pdir, rel))[0] for rel in selected}
+    except (CatalogError, SymlinkError, OSError, TypeError):
         return "unverifiable"
+    if any(not os.path.isfile(os.path.join(cache, rel, "SKILL.md")) for rel in selected) or \
+            skill_dirs(cache) != skill_dirs(pdir) or \
+            file_bytes(cache, DESCRIPTOR) != file_bytes(pdir, DESCRIPTOR):
+        return "stale"
+    for rel, digest in theirs.items():
+        try:
+            if digest_tree(os.path.join(cache, rel))[0] != digest:
+                return "stale"
+        except (SymlinkError, OSError):
+            return "stale"          # what the cache holds is not what the source holds
     return "match"
+
+
+DESCRIPTOR = os.path.join(".claude-plugin", "plugin.json")
+
+
+def file_bytes(root, rel):
+    try:
+        with open(os.path.join(root, rel), "rb") as f:
+            return f.read()
+    except FileNotFoundError:
+        return None
 
 
 def codex_plugin(ctx, m, src, cat, e, observed):
@@ -2153,28 +2138,45 @@ def sync_codex(ctx):
 
 # ── agy: skill copies (spec §5.3, §6) ─────────────────────────────────────────────────────────
 
+def catalog_links(tree):
+    """Every symlink in a catalog, relative: each one is a resolution error (spec §10)."""
+    out = []
+    for d, dirs, names in os.walk(tree):
+        dirs[:] = [n for n in dirs if n != ".git"]
+        out += [os.path.relpath(os.path.join(d, n), tree) for n in dirs + names
+                if os.path.islink(os.path.join(d, n))]
+    return sorted(out)
+
+
 def agy_selection(ctx):
     """Every skill the manifest selects for agy, with failures reported -> ([(Skill, label)],
-    unresolved): the sources, plugins and loose skills whose selection is not known this run,
-    whose owned copies prune must therefore leave alone (spec §6)."""
-    h, out, unresolved = "agy", [], set()
+    errors). Any resolution error, here or in a skill listing, means the selection is not
+    known completely, and prune waits for a run without one (spec §10)."""
+    h, out, errors = "agy", [], []
+
+    def failed(item, why, result="failed"):
+        ctx.report.add(h, item, result, why)
+        errors.append(item)
+
     for m in marketplaces_for(ctx, h):
         try:
-            src, cat = resolve_marketplace(ctx, m, h)
-            if src is not None and cat is None:
-                ctx.report.add(h, "marketplace %s" % m.name, "unchecked", "catalog not fetched "
-                               "yet; its skills are listed by --check or a run")
+            src, cat = resolve_marketplace(ctx, m, h)       # a failure has its row already
             if cat is None:
-                unresolved.add("@" + m.name)
+                errors.append("marketplace %s" % m.name)
+                if src is not None:
+                    ctx.report.add(h, "marketplace %s" % m.name, "unchecked", "catalog not "
+                                   "fetched yet; its skills are listed by --check or a run")
                 continue
-            enrolled, failed = enrol(ctx, m, h, cat)
+            enrolled, bad = enrol(ctx, m, h, cat)
         except ITEM_ERRORS as err:
-            ctx.report.add(h, "marketplace %s" % m.name, "failed", str(err))
-            unresolved.add("@" + m.name)
+            failed("marketplace %s" % m.name, str(err))
             continue
-        for pid, why in failed:
-            ctx.report.add(h, pid, "failed", why)
-            unresolved.add(pid)
+        links = catalog_links(cat.tree)
+        if links:
+            failed("marketplace %s" % m.name, "holds symlinks, which agent-sync never reads: "
+                   "%s; its other skills are copied" % ", ".join(links[:5]))
+        for pid, why in bad:
+            failed(pid, why)
         for e in enrolled:
             try:
                 skills = cat.skills(e.name)
@@ -2183,8 +2185,7 @@ def agy_selection(ctx):
                     raise CatalogError("agy_skills names %s, not a skill of this plugin"
                                        % ", ".join(unknown))
             except ITEM_ERRORS as err:
-                ctx.report.add(h, e.id, "failed", str(err))
-                unresolved.add(e.id)
+                failed(e.id, str(err))
                 continue
             if e.agy_skills is not None:
                 skills = [s for s in skills if s.name in e.agy_skills]
@@ -2193,7 +2194,7 @@ def agy_selection(ctx):
         if s.path:
             out.append((Skill(s.name, s.path, None, front_matter_error(s.path)), None))
             continue
-        src = git_source(ctx, "skill", s.name, git_url(s.git), s.ref)
+        src = git_source(ctx, "skill", git_url(s.git), s.ref)
         path = os.path.join(src.tree, s.subdir) if src.tree and s.subdir else src.tree
         why = src.error or (None if src.tree else "source not fetched yet")
         if not why:
@@ -2204,11 +2205,10 @@ def agy_selection(ctx):
         if not why and not os.path.isfile(os.path.join(path, "SKILL.md")):
             why = "%s holds no SKILL.md" % (s.subdir or "the repository")
         if why:
-            ctx.report.add(h, s.name, "failed" if src.tree or src.error else "unchecked", why)
-            unresolved.add("skill " + s.name)
+            failed(s.name, why, "failed" if src.tree or src.error else "unchecked")
             continue
         out.append((Skill(s.name, path, None, front_matter_error(path)), src.label()))
-    return out, unresolved
+    return out, errors
 
 
 def agy_item(skill):
@@ -2283,7 +2283,7 @@ def agy_copy(ctx, skill, label, owned):
     archive = os.path.join(ctx.paths.archive, ctx.ts, "agy", name)
     with critical():        # the swap and its record are one operation (spec §6)
         try:
-            got = install_tree(skill.path, dest, ctx.paths.agy_stage, archive, ctx.paths.agy_old)
+            got = install_tree(skill.path, dest, ctx.paths.agy_stage, archive)
         except TreeError as e:
             return ctx.report.add(h, item, "failed", str(e))
         ctx.state.data["agy"].pop(key, None)
@@ -2294,9 +2294,11 @@ def agy_copy(ctx, skill, label, owned):
         detail = "%s, %s" % (label, files(got["files"]))
         if got["archived"]:
             detail += "; previous copy archived to %s" % tilde(got["archived"])
-        row = ctx.report.add(h, item, "copied", detail + got["note"])   # inside: Ctrl-C keeps it
-        ctx.save_state("the copy at %s%s" % (tilde(dest), "; the previous one is at " +
-                                             tilde(got["archived"]) if got["archived"] else ""))
+        row = ctx.report.add(h, item, "copied", detail)   # inside: Ctrl-C keeps it
+        ctx.save_state("the copy at %s%s%s" % (
+            tilde(dest), "; the previous one is at " + tilde(got["archived"])
+            if got["archived"] else "", "; a first copy is held next run until --adopt " + name
+            if record is None else ""))
     return row
 
 
@@ -2306,7 +2308,7 @@ def sync_agy(ctx):
         return
     # Before the first agy command, which initialises its home (C1, spec §8).
     for p in (os.path.join(ctx.paths.home, ".gemini"), ctx.paths.gemini_config,
-              ctx.paths.agy_skills, ctx.paths.agy_stage, ctx.paths.agy_old):
+              ctx.paths.agy_skills, ctx.paths.agy_stage):
         if os.path.islink(p):
             ctx.report.add(h, "skills folder", "failed", "%s is a symlink; agent-sync writes "
                                                          "nothing there" % tilde(p))
@@ -2324,7 +2326,7 @@ def sync_agy(ctx):
             return
     # Names compare the way the destination volume compares them (spec §6).
     ctx.fold = str.lower if case_insensitive(ctx.paths.agy_skills) else str
-    selection, unresolved = agy_selection(ctx)
+    selection, errors = agy_selection(ctx)
     reserved = agy_reserved(ctx, plugins, ctx.fold)
     owned = {ctx.fold(n): n for n in ctx.state.data["agy"]}
     by_name = {}
@@ -2346,20 +2348,20 @@ def sync_agy(ctx):
                     agy_copy(ctx, skill, label, owned)
             except ITEM_ERRORS as e:
                 ctx.report.add(h, agy_item(skill), "failed", str(e))
-    # A marketplace or plugin whose selection could not be read may select any name, so prune
-    # waits for a run that reads every selection; a loose skill names only itself (spec §6).
-    blocking = sorted(u.lstrip("@") for u in unresolved if not u.startswith("skill "))
-    loose = {ctx.fold(u[len("skill "):]) for u in unresolved if u.startswith("skill ")}
+    # An orphan is known only from a selection read without any error: an unreadable one says
+    # nothing about what was removed, so neither orphans nor prune follow from it (spec §10).
+    if errors:
+        if ctx.args.prune:
+            ctx.report.add(h, "prune", "skipped", "nothing archived: the selection was not read "
+                           "completely (%s); run --prune again once it is" % ", ".join(errors))
+        return
     for name in sorted(set(ctx.state.data["agy"])):
-        source = ctx.state.data["agy"][name].get("source", "")
-        if ctx.fold(name) in by_name or ctx.fold(name) in loose or source in unresolved or \
-                "@" + source.partition("@")[2] in unresolved:
-            continue        # still selected, or its selection is unknown this run
+        if ctx.fold(name) in by_name:
+            continue
         dest = os.path.join(ctx.paths.agy_skills, name)
-        if not ctx.args.prune or not ctx.apply or blocking:
-            ctx.report.add(h, name, "orphaned", "%s left the manifest; %s" % (
-                tilde(dest), "not archived while %s could not be read" % ", ".join(blocking)
-                if blocking and ctx.args.prune else "--prune archives it"))
+        if not ctx.args.prune or not ctx.apply:
+            ctx.report.add(h, name, "orphaned", "%s left the manifest; --prune archives it"
+                           % tilde(dest))
             continue
         try:
             with critical():
@@ -2385,7 +2387,7 @@ def report_available(ctx):
             if h not in ctx.harnesses or m.source[h] == "none":
                 continue
             src = ctx.sources.get(("checkout", m.checkout) if m.source[h] == "checkout"
-                                  else ("marketplace", m.name))
+                                  else cache_name("marketplace", git_url(m.git), m.ref))
             cat = ctx.catalogs.get(src.tree) if src and src.tree else None
             for name in (cat.entries if cat else ()):
                 if name not in listed and name not in seen:
@@ -2438,12 +2440,16 @@ HARNESS_NAMES = {"claude": "Claude Code", "codex": "Codex"}
 
 
 def compare_trees(copy, plugin):
-    mine, theirs = tree_files(copy), tree_files(plugin)
+    """The content line for a candidate; a tree that cannot be read says so."""
+    try:
+        mine, theirs = tree_files(copy), tree_files(plugin)
+    except OSError as e:
+        return "cannot be read (%s), so it is never identical" % e
     changed = sorted(p for p in mine if p in theirs and mine[p] != theirs[p])
     only_copy = sorted(set(mine) - set(theirs))
     only_plugin = sorted(set(theirs) - set(mine))
     if not (changed or only_copy or only_plugin):
-        return True, "identical to the plugin"
+        return "identical to the plugin"
     parts = []
     if changed:
         parts.append(files(len(changed)) + " changed")
@@ -2451,7 +2457,7 @@ def compare_trees(copy, plugin):
         parts.append("%d only in the copy (%s)" % (len(only_copy), ", ".join(only_copy)))
     if only_plugin:
         parts.append("%d only in the plugin (%s)" % (len(only_plugin), ", ".join(only_plugin)))
-    return False, "DIFFERS from the plugin: " + ", ".join(parts)
+    return "DIFFERS from the plugin: " + ", ".join(parts)
 
 
 def unified_diff(copy, plugin):
@@ -2462,6 +2468,13 @@ def unified_diff(copy, plugin):
         b = mine.get(rel, b"").decode(errors="replace").splitlines(True)
         out += difflib.unified_diff(a, b, "plugin/" + rel, "copy/" + rel)
     return "".join(out)
+
+
+def holds_link(path):
+    """Whether path is a symlink or holds one at any depth, dot names included."""
+    return os.path.islink(path) or any(
+        os.path.islink(os.path.join(d, n)) for d, dirs, names in os.walk(path)
+        for n in dirs + names)
 
 
 def snapshot(path):
@@ -2491,10 +2504,14 @@ def cleanup_candidates(ctx):
                 pid, path, version, loaded = sel[n]
                 c = {"harness": h, "name": n, "path": os.path.join(root, n), "plugin": pid,
                      "plugin_path": loaded or path, "version": version,
-                     "link": os.path.islink(os.path.join(root, n))}
-                same, c["content"] = compare_trees(c["path"], c["plugin_path"])
-                c["digest"] = snapshot(c["path"])
-                c["identical"] = same and loaded is not None and not c["link"]
+                     "link": holds_link(os.path.join(root, n)),
+                     "digest": snapshot(os.path.join(root, n))}
+                c["content"] = "it is or holds a symlink; not compared" if c["link"] else \
+                    compare_trees(c["path"], c["plugin_path"])
+                # Identical needs two digests actually computed: an unreadable tree, or one
+                # holding a link, is equal to nothing (spec §10).
+                c["identical"] = loaded is not None and not c["link"] and \
+                    c["digest"] is not None and c["digest"] == snapshot(c["plugin_path"])
                 if loaded is None:
                     c["content"] = "the installed tree was not found; against the catalog: " \
                         + c["content"]
@@ -2545,8 +2562,8 @@ def cleanup_session(ctx, cands):
         if provenance(ctx, c["name"]):
             print("  provenance " + provenance(ctx, c["name"]))
         if c["link"]:
-            print("  action     none: a symlink is listed, never archived (moving a link changes "
-                  "what it points at)\n")
+            print("  action     none: it is or holds a symlink, so it is listed and never "
+                  "archived (moving a link changes what it points at)\n")
             continue
         print("  action     move to %s" % tilde(dest))
         if args.dry_run or stopped:
@@ -2569,7 +2586,10 @@ def cleanup_session(ctx, cands):
                 break
             answer = {"y": "y", "n": "n", "d": "d", "a": "a", "q": "q"}.get(line.strip()[:1])
             if answer == "d":
-                print(unified_diff(c["path"], c["plugin_path"]) or "(no differences)")
+                try:
+                    print(unified_diff(c["path"], c["plugin_path"]) or "(no differences)")
+                except OSError as e:
+                    print("cannot be read: %s" % e)
                 answer = None
             elif answer == "a":
                 auto = True
@@ -2580,11 +2600,14 @@ def cleanup_session(ctx, cands):
             stopped = True
         elif answer == "y":
             try:
-                ensure_dir(flat_root(ctx, c["harness"]))
-                if snapshot(c["path"]) != c["digest"]:
-                    raise TreeError("it changed since it was shown; run cleanup again to see it")
+                def unchanged(c=c):
+                    now = snapshot(c["path"])
+                    if now is None or now != c["digest"]:
+                        raise TreeError("it changed since it was shown, or cannot be read; "
+                                        "run cleanup again to see it")
+
                 with critical():    # the move and its record are one operation
-                    moved = archive_tree(c["path"], dest)
+                    moved = archive_tree(c["path"], dest, "src", unchanged)
                     ctx.state.data["cleanup"].setdefault(ts, []).append(
                         {"harness": c["harness"], "name": c["name"],
                          "slot": os.path.basename(moved)})
@@ -2620,12 +2643,15 @@ def cleanup_session(ctx, cands):
 
 def recheck(ctx, c):
     """At the answer, the copy is read again; one that changed while the question was open is
-    shown again and asked about again, never archived unseen (spec §10). -> "y" or None."""
-    if snapshot(c["path"]) == c["digest"]:
+    shown again and asked about again, never archived unseen (spec §10). -> "y", "n" or None."""
+    now = snapshot(c["path"])
+    if now is not None and now == c["digest"]:
         return "y"
-    c["digest"] = snapshot(c["path"])
-    same, c["content"] = compare_trees(c["path"], c["plugin_path"])
-    c["identical"] = c["identical"] and same
+    if now is None or holds_link(c["path"]):
+        print("  it cannot be read now, or holds a symlink; not archived")
+        return "n"
+    c["digest"], c["identical"] = now, False
+    c["content"] = compare_trees(c["path"], c["plugin_path"])
     print("  changed since it was shown; it now reads:\n  content    " + c["content"])
     return None
 
@@ -2651,7 +2677,7 @@ def cleanup_restore(ctx, ts):
         else:
             try:
                 with critical():    # the move and its record are one operation
-                    move_exact(held, back)      # exactly this name, or not at all (spec §10)
+                    move_exact(held, back, "dst")   # exactly this name, or not at all (§10)
                     records.remove(rec)
                     if not records:
                         del ctx.state.data["cleanup"][ts]

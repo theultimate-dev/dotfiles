@@ -168,7 +168,7 @@ class AgyCopy(support.SandboxCase, unittest.TestCase):
         row = find(got, "agy", "writing-release-notes")[0]
         self.assertEqual((row["result"], row["detail"]), ("copied", "6666666, 1 file"))
         cache = os.path.join(self.sb.cache_home, "agent-sync", "sources",
-                             "+skill-writing-release-notes")
+                             support.cache_name("skill", url, "v1.0.0"))
         self.assertIn(["-c", "core.symlinks=false", "clone", "--no-checkout", "--", url, cache],
                       self.sb.argvs("git"))
 

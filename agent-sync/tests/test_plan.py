@@ -261,8 +261,9 @@ class Enrolment(support.SandboxCase, unittest.TestCase):
     def test_check_fetches_into_the_own_cache_only(self):
         r = self.sb.run("--check", "--json")
         self.assertEqual(r.returncode, 1, "nothing is installed yet: drift")
-        self.assertTrue(os.path.isdir(os.path.join(self.sb.cache_home, "agent-sync", "sources",
-                                                   "example-skills")))
+        self.assertTrue(os.path.isdir(os.path.join(
+            self.sb.cache_home, "agent-sync", "sources",
+            support.cache_name("marketplace", scenario.URL, "main"))))
         for cmd in ("claude", "codex"):
             for argv in self.sb.argvs(cmd):
                 self.assertIn("list", argv)
