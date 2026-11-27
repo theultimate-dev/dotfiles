@@ -435,11 +435,13 @@ the `--restore` command for this cleanup run; keep it.
 <repo>/scripts/agent-sync --check
 ```
 
-It exits 0 and its summary reads `0 changed`: nothing has drifted. A `duplicate` row may remain.
-It names a flat copy that cleanup kept, because you answered no or for one of the reasons cleanup
-printed under it. Each such copy still shadows its plugin until you deal with it. Then start a
-fresh session in each harness, run `/skills reload` first in agy, and open its list of skills: a
-skill from a managed plugin appears once, apart from the copies the `duplicate` rows name.
+It exits 0, with `0 changed` in its summary, only when nothing has drifted. A `duplicate` row is
+drift and makes it exit 1. Such a row names a flat copy that cleanup kept, because you answered no
+or for one of the reasons cleanup printed under it, and the copy still shadows its plugin. Archive
+it with another `cleanup`, or list it under `[external]` in the manifest if you keep it on
+purpose; then run `--check` again. Then start a fresh session in each harness, run
+`/skills reload` first in agy, and open its list of skills: a skill from a managed plugin appears
+once.
 
 **Undo.** Each part has its own:
 

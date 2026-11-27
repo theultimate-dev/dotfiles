@@ -1812,5 +1812,202 @@ class Review4RestoreRoot(support.SandboxCase, unittest.TestCase):
         self.assertTrue(os.path.isfile(os.path.join(flat, "SKILL.md")))
 
 
+
+# ── Review 5 (818ebcb): each probe case, then a test of the class rule it falls under (§10) ────
+
+
+def bundled_alias(sb, target):
+    """agy's bundled skills folder as a symlink to target."""
+    alias = os.path.join(sb.home, ".gemini", "antigravity-cli", "builtin", "skills")
+    os.makedirs(os.path.dirname(alias))
+    os.symlink(target, alias)
+    return alias
+
+
+def loose_review_note(sb):
+    src = os.path.join(sb.home, "src", "review-note")
+    scenario.write_skill(src, "review-note", "incoming skill")
+    loose(sb, ("review-note", src))
+    return src
+
+
+def repair_adds(test, pid):
+    test.sb.clear_calls()
+    test.sb.run("--repair", "--json")
+    return ["plugin", "add", "--json", pid] in test.sb.argvs("codex")
+
+
+@unittest.skipIf(os.geteuid() == 0, ROOT_ONLY)
+class Review5Probes(support.SandboxCase, unittest.TestCase):
+    """The probe-5 cases, with the expected behaviour."""
+
+    def test_r5_b1_an_unreadable_non_skill_folder_never_triggers_a_codex_repair(self):
+        checkout = codex_checkout(self)
+        denied = os.path.join(checkout, "plugins", "planning", "skills", "unrelated")
+        os.mkdir(denied)
+        with open(os.path.join(denied, "README.md"), "w") as f:
+            f.write("not a skill")
+        with locked(denied):
+            r = self.sb.run("--json")
+            added = repair_adds(self, "planning@example-skills")
+        self.assertEqual(find(rows(r)[0], "codex", "planning@example-skills")[0]["result"],
+                         "unverifiable", r.stdout)
+        self.assertFalse(added)
+
+    def test_r5_b2_a_linked_bundled_skills_folder_still_blocks_a_collision(self):
+        loose_review_note(self.sb)
+        actual = os.path.join(self.sb.home, "bundled", "skills")
+        scenario.write_skill(os.path.join(actual, "review-note"), "review-note", "bundled")
+        bundled_alias(self.sb, actual)
+        r = self.sb.run("--json")
+        self.assertEqual(r.returncode, 1, r.stdout)
+        self.assertFalse(os.path.lexists(os.path.join(self.sb.agy_skills, "review-note")))
+        self.assertIn("bundled with agy", find(rows(r)[0], "agy", "review-note")[0]["detail"])
+
+    def test_r5_sf1_an_unreadable_other_flat_root_never_hides_the_undo_line(self):
+        flat = claude_flat_copy(self)
+        other = os.path.join(self.sb.home, ".agents", "skills")
+        os.makedirs(other)
+        with locked(other):
+            r = self.sb.run("cleanup", "--yes", os.path.basename(flat))
+        self.assertNotIn("Traceback", r.stderr)
+        self.assertFalse(os.path.exists(flat))
+        self.assertIn("Undo: agent-sync cleanup --restore ", r.stdout)
+        self.assertEqual(r.returncode, 1, "the unreadable root is still a failure")
+
+    def test_r5_sf3_a_link_added_while_the_prompt_is_open_is_never_archived(self):
+        flat = claude_flat_copy(self)
+        hidden = os.path.join(flat, ".local")
+        os.mkdir(hidden)
+        os.mkdir(os.path.join(os.path.dirname(flat), "referenced"))
+
+        class Answer:
+            def readline(self):
+                os.symlink(os.path.join("..", "..", "referenced"),
+                           os.path.join(hidden, "folder"))
+                return "a\n"
+
+        code, out, _ = captured(self.sb, ["cleanup"], stdin=Answer())
+        self.assertTrue(os.path.islink(os.path.join(hidden, "folder")), out)
+        self.assertEqual(read_state(self.sb)["cleanup"], {})
+        self.assertIn("symlink", out)
+
+
+@unittest.skipIf(os.geteuid() == 0, ROOT_ONLY)
+class Review5SelectionKnown(support.SandboxCase, unittest.TestCase):
+    """Rule (error is never absence, at its consumers): a skill that could not be inspected is
+    never a selected skill: Codex's check is unverifiable and issues no add, and no flat copy
+    becomes a duplicate of it."""
+
+    def test_r5_rule_an_uninspected_skill_makes_the_codex_check_unverifiable(self):
+        cases = {"an unreadable folder in skills/": "lock",
+                 "a SKILL.md that is a symlink": "link"}
+        for name, how in sorted(cases.items()):
+            with self.subTest(case=name):
+                self.sb.close()
+                self.sb = support.Sandbox()
+                checkout = codex_checkout(self)
+                folder = os.path.join(checkout, "plugins", "planning", "skills", "maybe")
+                scenario.write_skill(folder, "maybe")
+                marker = os.path.join(folder, "SKILL.md")
+                with contextlib.ExitStack() as stack:
+                    if how == "lock":
+                        stack.enter_context(locked(folder))
+                    else:
+                        os.rename(marker, marker + ".real")
+                        os.symlink("SKILL.md.real", marker)
+                    r = self.sb.run("--check", "--json")
+                    added = repair_adds(self, "planning@example-skills")
+                self.assertEqual(find(rows(r)[0], "codex", "planning@example-skills")[0]
+                                 ["result"], "unverifiable", r.stdout)
+                self.assertFalse(added)
+        self.addCleanup(lambda: self.sb.close())
+
+    def test_r5_rule_an_uninspected_skill_is_never_a_duplicate(self):
+        claude_flat_copy(self)
+        checkout = os.path.join(self.sb.home, "src", "example-skills")
+        folder = os.path.join(checkout, "plugins", "deploying", "skills", "maybe")
+        scenario.write_skill(folder, "maybe")
+        shutil.copytree(folder, os.path.join(self.sb.claude_home, "skills", "maybe"))
+        self.assertTrue(find(rows(self.sb.run("--json"))[0], "claude", "maybe", "duplicate"))
+        with locked(folder):
+            r = self.sb.run("--json")
+        self.assertFalse(find(rows(r)[0], "claude", "maybe", "duplicate"), r.stdout)
+        self.assertTrue(find(rows(r)[0], "claude", "deploying-apps", "duplicate"))
+
+
+@unittest.skipIf(os.geteuid() == 0, ROOT_ONLY)
+class Review5HarnessPaths(support.SandboxCase, unittest.TestCase):
+    """Rule: paths a harness owns and agent-sync only reads are read through links, and an
+    inventory that cannot be read fails what depends on it, never "nothing there"."""
+
+    def test_r5_rule_agy_s_bundled_skills_decide_collisions_through_a_link_or_not_at_all(self):
+        for case in ("linked", "unreadable", "dangling"):
+            with self.subTest(bundled=case):
+                self.sb.close()
+                self.sb = support.Sandbox()
+                loose_review_note(self.sb)
+                actual = os.path.join(self.sb.home, "bundled", "skills")
+                scenario.write_skill(os.path.join(actual, "review-note"), "review-note")
+                bundled_alias(self.sb, actual if case != "dangling" else actual + "-absent")
+                with contextlib.ExitStack() as stack:
+                    if case == "unreadable":
+                        stack.enter_context(locked(actual))
+                    r = self.sb.run("--json")
+                copied = os.path.lexists(os.path.join(self.sb.agy_skills, "review-note"))
+                self.assertEqual(copied, case == "dangling", r.stdout)
+                self.assertEqual(r.returncode, 0 if case == "dangling" else 1, r.stdout)
+        self.addCleanup(lambda: self.sb.close())
+
+    def test_r5_rule_codex_s_cache_is_compared_through_its_links(self):
+        codex_checkout(self)
+        skill = os.path.join(self.sb.codex_home, "plugins", "cache", "example-skills",
+                             "planning", "0.4.0", "skills", "framing-ideas")
+        elsewhere = os.path.join(self.sb.home, "codex-elsewhere", "framing-ideas")
+        os.makedirs(os.path.dirname(elsewhere))
+        os.rename(skill, elsewhere)
+        os.symlink(elsewhere, skill)
+        r = self.sb.run("--check", "--json")
+        self.assertEqual(find(rows(r)[0], "codex", "planning@example-skills")[0]["result"],
+                         "unchanged", r.stdout)
+        with open(os.path.join(elsewhere, "SKILL.md"), "a") as f:
+            f.write("changed\n")
+        r = self.sb.run("--check", "--json")
+        self.assertEqual(find(rows(r)[0], "codex", "planning@example-skills")[0]["result"],
+                         "stale", r.stdout)
+
+    def test_r5_rule_the_source_plugin_json_is_still_read_only_through_a_clean_chain(self):
+        checkout = codex_checkout(self)
+        meta = os.path.join(checkout, "plugins", "planning", ".claude-plugin")
+        os.rename(meta, meta + "-real")
+        os.symlink(".claude-plugin-real", meta)
+        r = self.sb.run("--check", "--json")
+        self.assertNotIn(find(rows(r)[0], "codex", "planning@example-skills")[0]["result"],
+                         ("unchanged", "stale"), r.stdout)
+        self.assertFalse(repair_adds(self, "planning@example-skills"))
+
+
+class Review5SourceRoots(support.SandboxCase, unittest.TestCase):
+    """Rule: a checkout or [[skill]] path the manifest names is trusted as given, link or not;
+    the link check starts beneath it."""
+
+    def test_r5_rule_a_linked_root_is_used_and_a_link_beneath_it_is_refused(self):
+        checkout = scenario.setup(self.sb, harnesses='["agy"]')
+        moved = os.path.join(self.sb.home, "moved-catalog")
+        os.rename(checkout, moved)
+        os.symlink(moved, checkout)
+        r = self.sb.run("--json")
+        self.assertEqual(r.returncode, 0, r.stdout)
+        self.assertTrue(os.path.isfile(os.path.join(self.sb.agy_skills, "framing-ideas",
+                                                    "SKILL.md")))
+        marker = os.path.join(moved, "plugins", "planning", "skills", "shaping-briefs",
+                              "SKILL.md")
+        os.rename(marker, marker + ".real")
+        os.symlink("SKILL.md.real", marker)
+        r = self.sb.run("--json")
+        self.assertEqual(find(rows(r)[0], "agy", "planning/shaping-briefs")[0]["result"],
+                         "failed", r.stdout)
+
+
 if __name__ == "__main__":
     unittest.main()

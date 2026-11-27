@@ -690,43 +690,54 @@ def _raise(e):
     raise e
 
 
-def walk(root):
+def walk(root, follow=False):
     """os.walk that raises at the first folder it cannot list, so a tree read in part is never
-    taken for the whole tree (spec §10, an error is never absence)."""
-    return os.walk(root, onerror=_raise)
+    taken for the whole tree (spec §10, an error is never absence). With follow, a tree a
+    harness owns is read through its links, and a folder reached twice is a loop and raises."""
+    seen = set()
+    for d, dirs, names in os.walk(root, onerror=_raise, followlinks=follow):
+        if follow:
+            real = os.path.realpath(d)
+            if real in seen:
+                raise OSError(errno.ELOOP, "a folder reached twice through links", d)
+            seen.add(real)
+        yield d, dirs, names
 
 
-def kind_of(path):
-    """"link", "dir", "file", "other", or None when nothing is there; a link is never followed.
-    Any other error, permission denied included, raises: an error is never absence (§10)."""
+def kind_of(path, follow=False):
+    """"link", "dir", "file", "other", or None when nothing is there; a link is followed only
+    with follow, for a path a harness owns and agent-sync only reads (spec §10). Any other
+    error, permission denied included, raises: an error is never absence."""
     try:
-        mode = os.lstat(path).st_mode
+        mode = (os.stat if follow else os.lstat)(path).st_mode
     except (FileNotFoundError, NotADirectoryError):
         return None
     return "link" if stat.S_ISLNK(mode) else "dir" if stat.S_ISDIR(mode) else \
         "file" if stat.S_ISREG(mode) else "other"
 
 
-def read_file(path):
-    """A file's bytes, never through a link at the file itself; the caller checks the folders
-    on the way (spec §10, declarations are read through the link check)."""
-    with os.fdopen(os.open(path, os.O_RDONLY | os.O_NOFOLLOW), "rb") as f:
+def read_file(path, follow=False):
+    """A file's bytes, never through a link at the file itself unless follow (a harness's own
+    file); the caller checks the folders on the way (spec §10)."""
+    flags = os.O_RDONLY | (0 if follow else os.O_NOFOLLOW)
+    with os.fdopen(os.open(path, flags), "rb") as f:
         return f.read()
 
 
-def digest_tree(root):
+def digest_tree(root, follow=False):
     """SHA-256 over sorted relative paths and file bytes, skipping names that begin with `.`.
 
     Returns (hexdigest, file count). A symlink anywhere fails: copying it would put a symlink in
-    $HOME, which Rule #1 forbids. A part that cannot be read raises OSError: a digest is never
-    computed from the readable part (spec §10)."""
-    if kind_of(root) == "link":
+    $HOME, which Rule #1 forbids. With follow, for a tree a harness owns and agent-sync only
+    reads, links are read through instead (spec §10). A part that cannot be read raises
+    OSError: a digest is never computed from the readable part."""
+    if not follow and kind_of(root) == "link":
         raise SymlinkError("%s is a symlink" % tilde(root))
     h = hashlib.sha256()
     count = 0
     files = []
-    for d, dirs, names in walk(root):
-        for n in dirs + names:
+    for d, dirs, names in walk(root, follow):
+        for n in [] if follow else dirs + names:
             if kind_of(os.path.join(d, n)) == "link":
                 raise SymlinkError("symlink in source: %s"
                                    % os.path.relpath(os.path.join(d, n), root))
@@ -735,19 +746,21 @@ def digest_tree(root):
                   if not n.startswith(".")]
     for rel in sorted(files):
         h.update(rel.encode() + b"\0")
-        h.update(hashlib.sha256(read_file(os.path.join(root, rel))).digest())
+        h.update(hashlib.sha256(read_file(os.path.join(root, rel), follow)).digest())
         count += 1
     return h.hexdigest(), count
 
 
-def tree_files(root):
-    """{relative path: bytes} for a tree, dot names skipped (for cleanup's comparison)."""
+def tree_files(root, follow=False):
+    """{relative path: bytes} for a tree, dot names skipped (for cleanup's comparison); with
+    follow, read through links, as for a harness's installed tree (spec §10)."""
     out = {}
-    for d, dirs, names in walk(root):
+    for d, dirs, names in walk(root, follow):
         dirs[:] = [n for n in dirs if not n.startswith(".")]
         for n in names:
             if not n.startswith("."):
-                out[os.path.relpath(os.path.join(d, n), root)] = read_file(os.path.join(d, n))
+                out[os.path.relpath(os.path.join(d, n), root)] = \
+                    read_file(os.path.join(d, n), follow)
     return out
 
 
@@ -1348,6 +1361,7 @@ class Skill:
     path: str
     plugin: str = None        # plugin id, or None for a [[skill]]
     error: str = None
+    inspected: bool = True    # False: it could not be told whether this is a skill at all
 
 
 class Catalog:
@@ -1395,7 +1409,8 @@ class Catalog:
                                     lambda rel: self.inside(rel, pdir)):
             n = os.path.basename(d)
             found.append(Skill(n, d, pid, why or (front_matter_error(d) if NAME.match(n) else
-                               "%r is not a name agent-sync can record; not copied" % n)))
+                               "%r is not a name agent-sync can record; not copied" % n),
+                               inspected=why is None))
         return found
 
 
@@ -1913,7 +1928,7 @@ def record_selection(ctx, harness, m, cat, enrolled, installed):
                                 str(p.get("version")))
         with contextlib.suppress(*ITEM_ERRORS):
             pdir = cat.plugin_dir(e.name)
-            for s in cat.skills(e.name):
+            for s in [s for s in cat.skills(e.name) if s.inspected]:   # never a guess (§10)
                 loaded = os.path.join(root, os.path.relpath(s.path, pdir)) \
                     if isinstance(root, str) else None
                 sel.setdefault(s.name, (e.id, s.path, p.get("version"),
@@ -2016,10 +2031,10 @@ def codex_marketplace(ctx, m, src, observed, refs, state):
     return git_refresh(ctx, h, m, src, state, upgrade, judge)
 
 
-def skill_dirs(root):
+def skill_dirs(root, follow=False):
     """Relative paths of the folders holding SKILL.md under root, dot names skipped."""
     out = set()
-    for d, dirs, names in walk(root):
+    for d, dirs, names in walk(root, follow):
         dirs[:] = [n for n in dirs if not n.startswith(".")]
         if "SKILL.md" in names:
             out.add(os.path.relpath(d, root))
@@ -2037,20 +2052,22 @@ def codex_cache_check(ctx, m, cat, name, version):
         if not version or not os.path.isdir(cache):
             return "unverifiable"
         pdir = cat.plugin_dir(name)
-        selected = sorted(os.path.relpath(s.path, pdir) for s in cat.skills(name))
-        if any(kind_of(os.path.join(cache, rel, "SKILL.md")) != "file" for rel in selected) or \
-                skill_dirs(cache) != skill_dirs(pdir) or \
-                file_bytes(cache, DESCRIPTOR) != file_bytes(pdir, DESCRIPTOR):
+        skills = cat.skills(name)
+        if not all(s.inspected for s in skills):
+            return "unverifiable"   # the selection itself is not known (spec §10)
+        selected = sorted(os.path.relpath(s.path, pdir) for s in skills)
+        # The cache is Codex's: read through its links. The source is a catalog: its
+        # plugin.json is read only after the link check on its chain (spec §10).
+        if any(kind_of(os.path.join(cache, rel, "SKILL.md"), True) != "file"
+               for rel in selected) or skill_dirs(cache, True) != skill_dirs(pdir) or \
+                file_bytes(os.path.join(cache, DESCRIPTOR), True) != \
+                file_bytes(cat.inside(DESCRIPTOR, pdir)):
             return "stale"
         for rel in selected:
-            try:
-                theirs = digest_tree(os.path.join(pdir, rel))[0]
-                mine = digest_tree(os.path.join(cache, rel))[0]
-            except SymlinkError:
-                return "stale"      # a link where the source has a file, or the reverse
-            if mine != theirs:
+            if digest_tree(os.path.join(cache, rel), True)[0] != \
+                    digest_tree(os.path.join(pdir, rel))[0]:
                 return "stale"
-    except (CatalogError, OSError, TypeError):
+    except (CatalogError, SymlinkError, OSError, TypeError):
         return "unverifiable"
     return "match"
 
@@ -2058,10 +2075,10 @@ def codex_cache_check(ctx, m, cat, name, version):
 DESCRIPTOR = os.path.join(".claude-plugin", "plugin.json")
 
 
-def file_bytes(root, rel):
+def file_bytes(path, follow=False):
     """A file's bytes, or None when it is absent; any other error raises (spec §10)."""
     try:
-        return read_file(os.path.join(root, rel))
+        return read_file(path, follow)
     except (FileNotFoundError, NotADirectoryError):
         return None
 
@@ -2263,8 +2280,11 @@ def agy_selection(ctx):
             except CatalogError as err:
                 why = str(err)
         try:
-            if not why and kind_of(os.path.join(path, "SKILL.md")) != "file":
-                why = "%s holds no SKILL.md" % (s.subdir or "the repository")
+            k = None if why else kind_of(os.path.join(path, "SKILL.md"))
+            if not why and k != "file":
+                why = "%s %s" % (s.subdir or "the repository", "has a SKILL.md that is a "
+                                 "symlink; nothing is read through it" if k == "link" else
+                                 "holds no SKILL.md")
         except OSError as err:
             why = "%s cannot be inspected: %s" % (s.subdir or "the repository", err)
         if why:
@@ -2280,9 +2300,11 @@ def agy_item(skill):
 
 
 def agy_reserved(ctx, plugins, fold):
-    """Names agy already has: its bundled skills and every installed agy plugin's skills."""
+    """Names agy already has: its bundled skills and every installed agy plugin's skills. agy's
+    folder is read through links, and one that cannot be read raises, so no copy proceeds as if
+    nothing were bundled (spec §10, source roots are trusted as given)."""
     reserved = {}
-    if kind_of(ctx.paths.agy_builtin) == "dir":
+    if kind_of(ctx.paths.agy_builtin, True) == "dir":
         for n in os.listdir(ctx.paths.agy_builtin):
             reserved[fold(n)] = "a skill bundled with agy"
     for p in plugins:
@@ -2379,7 +2401,8 @@ def sync_agy(ctx):
                                  ctx.paths.gemini_config, ctx.paths.agy_skills,
                                  ctx.paths.agy_stage) if kind_of(p) == "link"), None)
     except OSError as e:
-        return ctx.report.add(h, "skills folder", "failed", "cannot be inspected: %s" % e)
+        return ctx.report.add(h, "skills folder", "failed", "cannot be inspected, so no skill is "
+                              "copied: %s" % e)
     if link:
         return ctx.report.add(h, "skills folder", "failed", "%s is a symlink; agent-sync "
                                                             "writes nothing there" % tilde(link))
@@ -2541,7 +2564,7 @@ HARNESS_NAMES = {"claude": "Claude Code", "codex": "Codex"}
 def compare_trees(copy, plugin):
     """The content line for a candidate; a tree that cannot be read says so."""
     try:
-        mine, theirs = tree_files(copy), tree_files(plugin)
+        mine, theirs = tree_files(copy), tree_files(plugin, True)
     except OSError as e:
         return "cannot be read (%s), so it is never identical" % e
     changed = sorted(p for p in mine if p in theirs and mine[p] != theirs[p])
@@ -2560,7 +2583,7 @@ def compare_trees(copy, plugin):
 
 
 def unified_diff(copy, plugin):
-    mine, theirs = tree_files(copy), tree_files(plugin)
+    mine, theirs = tree_files(copy), tree_files(plugin, True)
     out = []
     for rel in sorted(set(mine) | set(theirs)):
         a = theirs.get(rel, b"").decode(errors="replace").splitlines(True)
@@ -2582,10 +2605,11 @@ def blocked(path):
     return None
 
 
-def snapshot(path):
-    """A copy's digest as it is now, or None when it cannot be read: what was shown."""
+def snapshot(path, follow=False):
+    """A copy's digest as it is now, or None when it cannot be read: what was shown. With
+    follow, for the harness's installed tree, read through its links (spec §10)."""
     try:
-        return digest_tree(path)[0]
+        return digest_tree(path, follow)[0]
     except (SymlinkError, OSError):
         return None
 
@@ -2595,14 +2619,16 @@ def cleanup_candidates(ctx):
     copy is compared with the tree the harness loads, never with a newer catalog (spec §9)."""
     saved = ctx.report, ctx.dry_run, ctx.apply, ctx.fetch
     ctx.report, ctx.dry_run, ctx.apply, ctx.fetch = Report(), True, False, False
-    out = []
+    out, kept = [], []
     try:
         sync_claude(ctx)
         sync_codex(ctx)
         for h in ("claude", "codex"):
             root, sel = flat_root(ctx, h), ctx.selected.get(h, {})
-            out += [(h, root, n, sel[n]) for n in flat_or_row(ctx, h)
+            names = flat_or_row(ctx, h)     # read once; the closing listing reuses it
+            out += [(h, root, n, sel[n]) for n in names
                     if n in sel and n not in ctx.manifest.external]
+            kept += [os.path.join(root, n) for n in names if n in ctx.manifest.external]
     finally:
         problems = [r for r in ctx.report.rows if r.result == "failed"]
         ctx.report, ctx.dry_run, ctx.apply, ctx.fetch = saved
@@ -2616,12 +2642,12 @@ def cleanup_candidates(ctx):
         # Identical needs two digests actually computed: an unreadable tree, or one holding a
         # link, is equal to nothing (spec §10).
         c["identical"] = loaded is not None and not c["blocked"] and \
-            c["digest"] is not None and c["digest"] == snapshot(c["plugin_path"])
+            c["digest"] is not None and c["digest"] == snapshot(c["plugin_path"], True)
         if loaded is None:
             c["content"] = "the installed tree was not found; against the catalog: " \
                 + c["content"]
         cands.append(c)
-    return cands, problems
+    return cands, problems, kept
 
 
 def provenance(ctx, name):
@@ -2643,17 +2669,17 @@ def run_cleanup(ctx):
     args = ctx.args
     if args.restore:
         return cleanup_restore(ctx, args.restore)
-    cands, problems = cleanup_candidates(ctx)
+    cands, problems, kept = cleanup_candidates(ctx)
     for row in problems:
         print("warning: %s %s: %s" % (row.harness, row.item, row.detail))
     unknown = [n for n in args.yes if n not in {c["name"] for c in cands}]
     if unknown:
         raise UsageError("not a cleanup candidate: %s" % ", ".join(unknown))
-    code = cleanup_session(ctx, cands)
+    code = cleanup_session(ctx, cands, kept)
     return EXIT_FAILED if problems else code
 
 
-def cleanup_session(ctx, cands):
+def cleanup_session(ctx, cands, kept=()):
     args, ts = ctx.args, ctx.ts
     print("agent-sync %s cleanup · manifest %s\n" % (VERSION, tilde(ctx.manifest.path)))
     if not cands:
@@ -2707,11 +2733,12 @@ def cleanup_session(ctx, cands):
             stopped = True
         elif answer == "y":
             try:
-                def unchanged(c=c):
+                def unchanged(c=c):     # the whole check again, at the move (spec §10)
                     now = snapshot(c["path"])
-                    if now is None or now != c["digest"]:
-                        raise TreeError("it changed since it was shown, or cannot be read; "
-                                        "run cleanup again to see it")
+                    why = blocked(c["path"])
+                    if why or now is None or now != c["digest"]:
+                        raise TreeError("%s; run cleanup again to see it" % (
+                            why or "it changed since it was shown, or cannot be read"))
 
                 with critical():    # the move and its record are one operation
                     moved = archive_tree(c["path"], dest, "src", unchanged)
@@ -2741,10 +2768,8 @@ def cleanup_session(ctx, cands):
         pass
     except OSError as e:
         print("  %s/: cannot be read (%s); not touched" % (tilde(synced), e))
-    for h in ("claude", "codex"):
-        for n in flat_names(flat_root(ctx, h)):
-            if n in ctx.manifest.external:
-                print("  %s: listed under [external]" % tilde(os.path.join(flat_root(ctx, h), n)))
+    for path in kept:
+        print("  %s: listed under [external]" % tilde(path))
     if archived:
         print("\nArchived %d: %s. The skills CLI's lock entries are left in place, so "
               "`skills list` will show archived copies as missing." % (len(archived),

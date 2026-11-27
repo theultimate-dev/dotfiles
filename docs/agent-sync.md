@@ -104,6 +104,15 @@ harness home may also be a symlink, set up on purpose to point at another profil
 neither checks nor refuses that: those homes are written only by their own CLIs, and cleanup moves
 folders in them where the link leads.
 
+**Source roots are trusted as given, too.** A `checkout` or a `[[skill]]` `path` you name in the
+manifest may itself be a symlink, or sit under one; it is the location you chose. The link check
+starts beneath it: a link inside a catalog or a skill folder is still refused, and so is a
+`SKILL.md` or `plugin.json` that is a link. Paths a harness owns and agent-sync only reads are
+read through links: agy's bundled skills, Codex's plugin cache and Claude Code's installed plugin
+folders. When such an inventory cannot be read, what depends on it fails rather than proceeding
+as if it were empty: an agy bundled-skills folder that cannot be read stops every agy copy,
+since any of them could collide with a bundled skill.
+
 **Keep the state directory on the home volume.** Every move agent-sync makes is a single rename,
 into or out of the archive under `$XDG_STATE_HOME`. A rename cannot cross volumes, and agent-sync
 never falls back to copying and deleting, so nothing can be left half-removed. When the archive is
@@ -252,7 +261,9 @@ a skill added, removed, renamed, or dropped from the plugin's `skills` list upst
 documented interface, so a layout agent-sync does not recognise is `unverifiable`, never a
 failure and never a repair. So is a file it cannot read, on either side: a permission error
 proves neither a match nor a difference. A read error never hides drift already found, though: a
-selected skill missing from the cache is `stale` even when a source file cannot be read.
+selected skill missing from the cache is `stale` even when a source file cannot be read. A
+source folder that cannot be inspected is not a selected skill either: the selection itself is
+then unknown, the check is `unverifiable`, and `--repair` leaves the plugin alone.
 
 A successful answer from `codex plugin add` is not taken as proof either. Every install and repair
 is settled against the plugin list taken after it. A plugin missing from that list, or listed as
