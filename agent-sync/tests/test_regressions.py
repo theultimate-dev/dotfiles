@@ -2398,5 +2398,133 @@ class Review7Identity(support.SandboxCase, unittest.TestCase):
         self.assertFalse([a for a in self.sb.argvs("claude") if a[1:3] == ["marketplace", "add"]])
 
 
+
+# ── Review 8 (bc0d7f5): each probe case, then the rule: a remembered folder is the identity
+# recorded when it was used, never a second look at its path (§10) ──────────────────────────
+
+
+def rehome(test, root, name):
+    """Move root aside and leave a link to a fresh, different folder at its name -> (the
+    original, now aside, and the other folder)."""
+    aside = os.path.join(test.sb.home, "first-profile-" + name)
+    other = os.path.join(test.sb.home, "other-profile-" + name)
+    os.rename(root, aside)
+    os.mkdir(other)
+    os.symlink(other, root)
+    return aside, other
+
+
+class Review8Probes(support.SandboxCase, unittest.TestCase):
+    """The probe-8 cases, with the expected behaviour."""
+
+    def test_r8_b1_restore_never_follows_a_rehomed_root_into_another_profile(self):
+        flat = claude_flat_copy(self)
+        ts, held = archive_flat(self, flat)
+        root = os.path.dirname(flat)
+        aside, other = rehome(self, root, "skills")
+        r = self.sb.run("cleanup", "--restore", ts)
+        self.assertEqual(r.returncode, 1, r.stdout)
+        self.assertIn("not the folder", r.stdout)
+        self.assertEqual(os.listdir(other), [])
+        self.assertTrue(os.path.isdir(held))
+        self.assertIn(ts, read_state(self.sb)["cleanup"])
+        os.remove(root)
+        os.rename(aside, root)      # the folder it came from, back at its place
+        r = self.sb.run("cleanup", "--restore", ts)
+        self.assertEqual(r.returncode, 0, r.stdout)
+        self.assertTrue(os.path.isfile(os.path.join(flat, "SKILL.md")))
+
+    def test_r8_sf1_declining_a_changed_copy_keeps_the_answer_for_all(self):
+        cache, flat = codex_flat(self, "framing-ideas", "shaping-briefs")
+        first = os.path.join(flat, "framing-ideas", "SKILL.md")
+
+        def edit():
+            with open(first, "a") as f:
+                f.write("\nan edit while the prompt is open\n")
+
+        code, out, _ = captured(self.sb, ["cleanup"], stdin=SwapOnRead(edit, "a\n", "n\n"))
+        self.assertIn("changed since it was shown", out)
+        self.assertTrue(os.path.isfile(first))
+        self.assertFalse(os.path.exists(os.path.join(flat, "shaping-briefs")), out)
+        self.assertEqual(out.count("Archive this copy?"), 2, out)
+
+
+class Review8RememberedFolder(support.SandboxCase, unittest.TestCase):
+    """Rule: a cleanup record keeps the device and inode of the flat root it was archived from,
+    and restore requires the current root to be that folder; a record without them restores
+    only to the same resolved path, and refuses on any doubt."""
+
+    def test_r8_rule_the_record_holds_the_root_s_identity_at_archive_time(self):
+        flat = claude_flat_copy(self)
+        ts, _ = archive_flat(self, flat)
+        st = os.stat(os.path.dirname(flat))
+        rec = read_state(self.sb)["cleanup"][ts][0]
+        self.assertEqual(rec["root_id"], [st.st_dev, st.st_ino])
+        self.assertEqual(rec["root"], os.path.realpath(os.path.dirname(flat)))
+
+    def test_r8_rule_restore_needs_that_folder_whatever_path_reaches_it(self):
+        cases = {"the same folder through another path": True,
+                 "a new folder at the same path": False,
+                 "the root missing": False}
+        for case, restores in sorted(cases.items()):
+            with self.subTest(case=case):
+                self.sb.close()
+                self.sb = support.Sandbox()
+                flat = claude_flat_copy(self)
+                ts, held = archive_flat(self, flat)
+                root = os.path.dirname(flat)
+                if case == "the same folder through another path":
+                    alias = os.path.join(self.sb.home, "profile-alias")
+                    os.symlink(self.sb.claude_home, alias)
+                    base = self.sb.env()
+                    self.sb.env = lambda: dict(base, CLAUDE_CONFIG_DIR=alias)
+                elif case == "a new folder at the same path":
+                    os.rename(root, root + "-old")
+                    os.mkdir(root)
+                else:
+                    os.rename(root, root + "-old")
+                r = self.sb.run("cleanup", "--restore", ts)
+                self.assertEqual(r.returncode, 0 if restores else 1, r.stdout)
+                self.assertEqual(os.path.isdir(held), not restores)
+                self.assertEqual(ts in read_state(self.sb)["cleanup"], not restores)
+                self.assertNotIn("Traceback", r.stderr)
+        self.addCleanup(lambda: self.sb.close())
+
+    def test_r8_rule_a_record_without_identity_restores_only_to_the_same_resolved_path(self):
+        cases = ["unchanged", "rehomed by a link", "another spelling"]
+        for case in cases:
+            with self.subTest(case=case):
+                self.sb.close()
+                self.sb = support.Sandbox()
+                if case == "another spelling":
+                    case_blind(self)
+                flat = claude_flat_copy(self)
+                ts, held = archive_flat(self, flat)
+                doc = read_state(self.sb)
+                rec = doc["cleanup"][ts][0]
+                del rec["root_id"]
+                if case == "another spelling":
+                    rec["root"] = upper_leaf(rec["root"])
+                write_state(self.sb, doc)
+                if case == "rehomed by a link":
+                    rehome(self, os.path.dirname(flat), "skills")
+                r = self.sb.run("cleanup", "--restore", ts)
+                restores = case == "unchanged"
+                self.assertEqual(r.returncode, 0 if restores else 1, r.stdout)
+                self.assertEqual(os.path.isdir(held), not restores)
+                self.assertEqual(ts in read_state(self.sb)["cleanup"], not restores)
+        self.addCleanup(lambda: self.sb.close())
+
+    def test_r8_rule_a_malformed_identity_is_a_state_problem(self):
+        good = {"harness": "claude", "name": "a", "slot": "a", "root": "/r", "root_id": [1, 2]}
+        doc = {"version": 1, "agy": {}, "applied": {}, "cleanup": {}}
+        stamp = "2026-11-27T10-00-00"
+        self.assertIsNone(A.state_problem(dict(doc, cleanup={stamp: [good]})))
+        for bad in ([1], [1, "2"], "1:2", [True, 2]):
+            with self.subTest(root_id=bad):
+                self.assertIsNotNone(A.state_problem(dict(doc, cleanup={
+                    stamp: [dict(good, root_id=bad)]})))
+
+
 if __name__ == "__main__":
     unittest.main()

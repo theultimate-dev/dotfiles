@@ -410,8 +410,7 @@ Whether one path is, or lies inside, another is the filesystem's answer, never t
 agent-sync compares device and inode along the resolved chain. On macOS's case-insensitive volume,
 `~/.agents/skills/framing-ideas` and `~/.agents/skills/FRAMING-IDEAS` are one folder, and an
 installed link to either spelling is a dependency on the copy. The same comparison decides whether a
-Claude or Codex marketplace already points at your checkout and whether a restore reaches the folder
-a copy was archived from.
+Claude or Codex marketplace already points at your checkout.
 
 The skills CLI's lock file, `~/.agents/.skill-lock.json`, may have an entry for the name. A
 `provenance` line then says so; cleanup reads that file and never writes it.
@@ -420,14 +419,17 @@ The copy is read again when you answer. If it changed while the question was ope
 and asked about again; with `--yes`, it is not archived and cleanup exits 1. A yes is a rename into
 `archive/<timestamp>/<harness>/<name>`. The state file records it in the same protected step, so
 Ctrl-C cannot leave a moved folder unrecorded. Nothing is deleted, and `--restore <timestamp>` puts
-that run's folders back, each at exactly its old name or not at all. Each record keeps the resolved
-path of the flat folder it came from. When `~/.claude/skills` or `~/.agents/skills` is now a
-different folder, because `CLAUDE_CONFIG_DIR` changed or `~/.claude` is a link to another profile,
-restore refuses that folder. Reach the same profile again, by whatever path, and restore it. A name
-that has since reappeared, even during the restore, whose archived folder is gone, or whose profile
-changed, stays on record; restore reports it and exits 1. `--restore` with `--dry-run` shows what it
-would move and moves nothing. Cleanup logs its own listing commands to `last-run.log`, as a run
-does. It exits 1 if it could not read a harness's inventory.
+that run's folders back, each at exactly its old name or not at all. Each record keeps the device
+and inode of the flat folder it came from, as the filesystem named it at the archive, and its
+resolved path for messages. Restore puts a copy back only into that folder: when `~/.claude/skills`
+or `~/.agents/skills` is now another folder, because `CLAUDE_CONFIG_DIR` changed, `~/.claude` links
+to another profile, or the folder was moved aside and replaced, restore refuses. Reach the same
+folder again, by whatever path, and restore it. A record written before agent-sync kept the identity
+restores only when the folder resolves to the recorded path exactly. A name that has since
+reappeared, even during the restore, whose archived folder is gone, or whose profile changed, stays
+on record; restore reports it and exits 1. `--restore` with `--dry-run` shows what it would move and
+moves nothing. Cleanup logs its own listing commands to `last-run.log`, as a run does. It exits 1 if
+it could not read a harness's inventory.
 
 **`skills list` will show archived copies as missing.** The skills CLI that made those copies
 keeps a lock file of what it installed. That file belongs to that tool, so cleanup does not edit

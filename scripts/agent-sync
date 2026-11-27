@@ -665,10 +665,13 @@ def state_problem(d):
                 isinstance(r, dict) and r.get("harness") in ("claude", "codex") and
                 isinstance(r.get("name"), str) and isinstance(r.get("slot"), str) and
                 isinstance(r.get("root", ""), str) and NAME.match(r["name"]) and
+                isinstance(r.get("root_id", [0, 0]), list) and len(r.get("root_id", [0, 0])) == 2
+                and all(type(x) is int for x in r.get("root_id", [0, 0])) and
                 re.match(r"^%s(\.\d+)?$" % re.escape(r["name"]), r["slot"])
                 for r in recs)
             for ts, recs in cleanup.items()):
-        return "cleanup holds a run that is not {timestamp: [{harness, name, slot, root}]}"
+        return "cleanup holds a run that is not {timestamp: [{harness, name, slot, root, " \
+            "root_id}]}"
     return None
 
 
@@ -2788,8 +2791,8 @@ def cleanup_session(ctx, cands, kept=()):
             print()
             continue
         while True:
-            answer, automatic = ask(ctx, c, auto)
-            auto = auto or automatic or answer == "a"
+            answer, automatic, chose_all = ask(ctx, c, auto)
+            auto = auto or chose_all
             if answer != "y":
                 break
             try:
@@ -2804,12 +2807,15 @@ def cleanup_session(ctx, cands, kept=()):
                     if automatic and links:
                         raise AskAlone(links)
 
+                # The folder it is archived from, as the filesystem names it: restore goes
+                # back to that folder only; the path is kept for the message (spec §10).
+                root = flat_root(ctx, c["harness"])
+                where = {"root": os.path.realpath(root), "root_id": list(ident(root))}
                 with critical():    # the move and its record are one operation
                     moved = archive_tree(c["path"], dest, "src", unchanged)
                     ctx.state.data["cleanup"].setdefault(ts, []).append(
-                        {"harness": c["harness"], "name": c["name"],
-                         "slot": os.path.basename(moved),
-                         "root": os.path.realpath(flat_root(ctx, c["harness"]))})
+                        dict(where, harness=c["harness"], name=c["name"],
+                             slot=os.path.basename(moved)))
                     if not ctx.save_state("the archive of %s at %s"
                                           % (tilde(c["path"]), tilde(moved))):
                         print("  moved to %s, but the state file could not be written, so "
@@ -2859,13 +2865,15 @@ class AskAlone(Exception):
 
 
 def ask(ctx, c, auto):
-    """One candidate's answer -> (answer, automatic). The answer is "y", "n", "q", or "a" for
-    a copy that [a]ll passes over; automatic when the yes comes from [a]ll rather than from a
-    look at this candidate, so the move can void it when links appear (spec §10)."""
+    """One candidate's answer -> (answer, automatic, all): the answer is "y", "n" or "q";
+    automatic when the yes comes from [a]ll rather than a look at this candidate, so the move
+    can void it when links appear; all when [a]ll was chosen at any of its prompts, which holds
+    for the copies after it whatever this one's answer becomes (spec §10)."""
     if ctx.args.yes:
-        return ("y" if c["name"] in ctx.args.yes else "n"), False
+        return ("y" if c["name"] in ctx.args.yes else "n"), False, False
     if auto and c["identical"] and not c["links"]:
-        return "y", True
+        return "y", True, False
+    chose_all = False
     while True:
         sys.stdout.write("Archive this copy? [y]es / [n]o / [d]iff / [a]ll remaining "
                          "identical / [q]uit ")
@@ -2873,7 +2881,7 @@ def ask(ctx, c, auto):
         line = sys.stdin.readline()
         if not line:
             print("\nno answer; stopping (non-interactive use needs --yes <name>…)")
-            return "q", False
+            return "q", False, chose_all
         answer = {"y": "y", "n": "n", "d": "d", "a": "a", "q": "q"}.get(line.strip()[:1])
         if answer == "d":
             try:
@@ -2882,18 +2890,17 @@ def ask(ctx, c, auto):
             except OSError as e:
                 print("cannot be read: %s" % e)
             continue
+        chose_all = chose_all or answer == "a"
         # A differing copy is kept by [a]ll, and so is one whose installed tree holds links.
         if answer == "a" and not (c["identical"] and not c["links"]):
-            return "a", False
+            return "n", False, True
         if answer in ("y", "a"):
             again = recheck(ctx, c)
-            if again == "y":
-                return "y", answer == "a"
-            if again == "n":
-                return ("a" if answer == "a" else "n"), False
+            if again in ("y", "n"):
+                return again, again == "y" and answer == "a", chose_all
             continue
         if answer in ("n", "q"):
-            return answer, False
+            return answer, False, chose_all
 
 
 def recheck(ctx, c):
@@ -2922,17 +2929,21 @@ def cleanup_restore(ctx, ts):
         back = os.path.join(flat_root(ctx, rec["harness"]), rec["name"])
         held = os.path.join(ctx.paths.archive, ts, rec["harness"], rec["slot"])
         now = os.path.realpath(flat_root(ctx, rec["harness"]))
-        # Another profile, by link or by environment, is another folder: device and inode, so
-        # a second spelling of the recorded root is still that root (spec §10).
+        # Back only into the folder it was archived from: the device and inode recorded then,
+        # never a second look at a path that may now lead elsewhere. A record without them
+        # restores only to the same resolved path, and refuses on any doubt (spec §10).
         try:
-            same, why = same_folder(rec.get("root"), flat_root(ctx, rec["harness"])), None
+            same, why = rec.get("root") == now if "root_id" not in rec else \
+                list(ident(flat_root(ctx, rec["harness"]))) == rec["root_id"], None
+        except (FileNotFoundError, NotADirectoryError):
+            same, why = False, None
         except OSError as e:
             same, why = None, e
         if why:
             print("%s cannot be inspected (%s); not restored (the archived copy stays at %s)"
                   % (tilde(flat_root(ctx, rec["harness"])), why, tilde(held)))
         elif not same:
-            print("%s now resolves to %s, not to %s it was archived from; not restored (the "
+            print("%s is now %s, not the folder %s it was archived from; not restored (the "
                   "archived copy stays at %s)" % (tilde(flat_root(ctx, rec["harness"])),
                                                   tilde(now), tilde(rec.get("root") or
                                                                     "an unrecorded folder"),
