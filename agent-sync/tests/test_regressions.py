@@ -486,16 +486,17 @@ class Adapters(support.SandboxCase, unittest.TestCase):
         for home in (self.sb.claude_home, self.sb.codex_home):
             shutil.rmtree(home, ignore_errors=True)
         r = self.sb.run("--dry-run", "--json")
-        got, _ = rows(r)
-        for h, item in (("claude", "claude CLI"), ("codex", "codex CLI"), ("agy", "agy CLI")):
-            row = find(got, h, item)[0]
-            self.assertEqual(row["result"], "unknown")
-            self.assertIn("home not initialised", row["detail"])
+        # The forbidden calls and writes first, so a missing row cannot mask them.
         self.assertEqual(self.sb.calls("claude") + self.sb.calls("codex") +
                          self.sb.calls("agy"), [])
         for home in (self.sb.claude_home, self.sb.codex_home,
                      os.path.join(self.sb.home, ".gemini")):
             self.assertFalse(os.path.exists(home), home)
+        got, _ = rows(r)
+        for h, item in (("claude", "claude CLI"), ("codex", "codex CLI"), ("agy", "agy CLI")):
+            row = find(got, h, item)[0]
+            self.assertEqual(row["result"], "unknown")
+            self.assertIn("home not initialised", row["detail"])
 
     def test_sf4_check_never_takes_its_own_fetch_as_the_applied_revision(self):
         scenario.setup(self.sb, harnesses='["claude"]')
@@ -537,10 +538,10 @@ class Adapters(support.SandboxCase, unittest.TestCase):
         with open(catalog, "w") as f:
             json.dump(doc, f)
         r = self.sb.run("--json")
+        for argv in self.sb.argvs("claude"):     # the forbidden call first: a row cannot mask it
+            self.assertFalse(any(a.startswith("--scope=project") for a in argv), argv)
         row = find(rows(r)[0], "claude", "'--scope=project'@example-skills")[0]
         self.assertEqual(row["result"], "failed")
-        for argv in self.sb.argvs("claude"):
-            self.assertFalse(any(a.startswith("--scope=project") for a in argv), argv)
 
     def test_sf7_an_option_like_manifest_operand_is_a_usage_error(self):
         scenario.setup(self.sb, harnesses='["claude"]')
@@ -579,6 +580,481 @@ class Adapters(support.SandboxCase, unittest.TestCase):
         r = self.sb.run()
         self.assertIn("source-mismatch", r.stdout)
         self.assertNotIn("hunter2", r.stdout + r.stderr)
+
+
+# ── Review 2 (4339b9f): every probe case, and the neighbouring variant of each ──────────────────
+
+
+def captured(sb, argv, stdin=None, patches=()):
+    """main() in this process -> (exit, stdout, stderr), with attributes of the script replaced
+    for the duration: patches is [(name, value)]."""
+    out, err = io.StringIO(), io.StringIO()
+    saved = [(n, getattr(A, n)) for n, _ in patches]
+    real_stdin = sys.stdin
+    try:
+        for n, v in patches:
+            setattr(A, n, v)
+        if stdin is not None:
+            sys.stdin = stdin
+        with sb.active(), contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            code = A.main(argv)
+    finally:
+        sys.stdin = real_stdin
+        for n, v in saved:
+            setattr(A, n, v)
+    return code, out.getvalue(), err.getvalue()
+
+
+def claude_flat_copy(test):
+    """Claude with the example catalog installed, and a flat copy of deploying-apps shadowing
+    the plugin's skill -> the flat path."""
+    sb = test.sb
+    scenario.setup(sb, harnesses='["claude"]')
+    test.assertEqual(sb.run().returncode, 0)
+    flat = os.path.join(sb.claude_home, "skills", "deploying-apps")
+    shutil.copytree(os.path.join(sb.home, "src", "example-skills", "plugins", "deploying",
+                                 "skills", "deploying-apps"), flat)
+    return flat
+
+
+def archive_flat(test, flat):
+    r = test.sb.run("cleanup", "--yes", os.path.basename(flat))
+    test.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+    ts = restore_stamp(r)
+    return ts, os.path.join(test.sb.state_dir, "archive", ts, "claude", os.path.basename(flat))
+
+
+def git_market(sb, name, n):
+    """A Git marketplace remote named `name`, holding the flat fixture at commit sha(n)."""
+    url = "https://example.invalid/review-test/%s.git" % name
+    tree = sb.remote(url, "catalog-flat", support.sha(n), ref="main")
+    path = os.path.join(tree, ".claude-plugin", "marketplace.json")
+    with open(path) as f:
+        doc = json.load(f)
+    doc["name"] = name
+    with open(path, "w") as f:
+        json.dump(doc, f)
+    return url, tree
+
+
+def agy_market(sb, name, url, extra=""):
+    sb.manifest('version = 1\nharnesses = ["agy"]\n[[marketplace]]\nname = "%s"\ngit = "%s"\n'
+                'ref = "main"\nharnesses = ["agy"]\n[[plugin]]\nid = "planning@%s"\n'
+                'agy_skills = ["framing-ideas"]\n%s' % (name, url, name, extra))
+
+
+def state_write_fails(sb):
+    """atomic_write that fails with ENOSPC for the state file only."""
+    real = A.atomic_write
+    target = os.path.join(sb.state_dir, "state.json")
+
+    def write(path, text):
+        if path == target:
+            raise OSError(errno.ENOSPC, "No space left on device")
+        return real(path, text)
+    return [("atomic_write", write)]
+
+
+class Review2Restore(support.SandboxCase, unittest.TestCase):
+    """B1, B6: restore checks both chains at the move, and lands on the exact name."""
+
+    def test_r2_b1_restore_refuses_a_symlink_anywhere_in_the_archive_chain(self):
+        for level in ("harness", "timestamp", "archive root"):
+            with self.subTest(level=level):
+                self.sb.close()
+                self.sb = support.Sandbox()
+                flat = claude_flat_copy(self)
+                ts, held = archive_flat(self, flat)
+                moved = {"harness": os.path.dirname(held),
+                         "timestamp": os.path.dirname(os.path.dirname(held)),
+                         "archive root": os.path.join(self.sb.state_dir, "archive")}[level]
+                outside = os.path.join(self.sb.home, "unrelated")
+                os.rename(moved, outside)
+                os.symlink(outside, moved)
+                r = self.sb.run("cleanup", "--restore", ts)
+                self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+                self.assertIn("is a symlink", r.stdout)
+                self.assertFalse(os.path.exists(flat))
+                self.assertIn(ts, read_state(self.sb)["cleanup"])
+        self.addCleanup(lambda: self.sb.close())
+
+    def test_r2_b6_restore_lands_on_the_exact_name_or_fails(self):
+        flat = claude_flat_copy(self)
+        ts, held = archive_flat(self, flat)
+        real = A.ensure_dir
+
+        def appears(path, **k):
+            if path == os.path.dirname(flat) and not os.path.exists(flat):
+                scenario.write_skill(flat, "deploying-apps", "unrelated replacement")
+            return real(path, **k)
+
+        code, out, _ = captured(self.sb, ["cleanup", "--restore", ts],
+                                patches=[("ensure_dir", appears)])
+        self.assertEqual(code, 1, out)
+        self.assertFalse(os.path.exists(flat + ".2"))
+        with open(os.path.join(flat, "SKILL.md")) as f:
+            self.assertIn("unrelated replacement", f.read())
+        self.assertTrue(os.path.isdir(held))
+        self.assertIn(ts, read_state(self.sb)["cleanup"])
+
+    def test_r2_b1_cleanup_refuses_a_symlinked_flat_root(self):
+        flat = claude_flat_copy(self)
+        root = os.path.dirname(flat)
+        os.rename(root, root + "-real")
+        os.symlink(root + "-real", root)
+        r = self.sb.run("cleanup", "--yes", "deploying-apps")
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertTrue(os.path.isdir(os.path.join(root + "-real", "deploying-apps")))
+        self.assertEqual(read_state(self.sb)["cleanup"], {})
+
+
+class Review2Names(support.SandboxCase, unittest.TestCase):
+    """B2: a name agent-sync cannot record is never written, and the state is fully typed."""
+
+    def test_r2_b2_a_catalog_skill_with_an_unusable_name_fails_and_is_not_copied(self):
+        checkout = scenario.setup(self.sb, harnesses='["agy"]')
+        scenario.add_plugin(checkout, "unusual", ["daily notes"])
+        first = self.sb.run("--json")
+        self.assertEqual(first.returncode, 1, first.stdout)
+        self.assertFalse(os.path.lexists(os.path.join(self.sb.agy_skills, "daily notes")))
+        row = find(rows(first)[0], "agy", "unusual/daily notes")[0]
+        self.assertEqual(row["result"], "failed")
+        self.assertIn("not a name agent-sync can record", row["detail"])
+        self.assertNotIn("daily notes", read_state(self.sb)["agy"])
+        second = self.sb.run("--json")
+        self.assertEqual(second.returncode, 1, second.stdout + second.stderr)
+
+    def test_r2_b2_an_unusable_skill_name_is_never_a_cleanup_candidate(self):
+        checkout = scenario.setup(self.sb, harnesses='["codex"]')
+        scenario.add_plugin(checkout, "unusual", ["daily notes"])
+        manifest = os.path.join(self.sb.config_home, "agent-sync", "manifest.toml")
+        with open(manifest) as f:
+            text = f.read()
+        self.sb.manifest(text.replace('codex     = "git"\nagy', 'codex     = "checkout"\nagy', 1))
+        self.sb.run()
+        scenario.write_skill(os.path.join(self.sb.home, ".agents", "skills", "daily notes"),
+                             "daily notes")
+        r = self.sb.run("cleanup", "--dry-run")
+        self.assertNotIn("daily notes", r.stdout)
+        self.assertEqual(self.sb.run("cleanup", "--yes", "daily notes").returncode, 2)
+
+    def test_r2_b2_state_fields_of_the_wrong_type_are_refused(self):
+        src = os.path.join(self.sb.home, "src", "review-note")
+        scenario.write_skill(src, "review-note")
+        loose(self.sb, ("review-note", src))
+        for doc in ({"cleanup": {STAMP: [{"harness": "claude", "name": 5, "slot": 5}]}},
+                    {"agy": {"review-note": {"digest": "d", "source": {"a": 1}}}},
+                    {"agy": {"review-note": {"digest": "d", "path": ["x"]}}},
+                    {"applied": {"claude": {"m": {"revision": 5}}}}):
+            with self.subTest(doc=doc):
+                write_state(self.sb, doc)
+                r = self.sb.run("--prune")
+                self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+
+
+class Review2StateWrites(support.SandboxCase, unittest.TestCase):
+    """B3: a state write that fails is reported with its paths, and the report still prints."""
+
+    def setUp(self):
+        super().setUp()
+        self.src = os.path.join(self.sb.home, "src", "review-note")
+        scenario.write_skill(self.src, "review-note", "old")
+        loose(self.sb, ("review-note", self.src))
+        self.assertEqual(self.sb.run().returncode, 0)
+
+    def test_r2_b3_a_failed_state_write_after_a_copy_is_reported_and_recovers(self):
+        scenario.write_skill(self.src, "review-note", "new")
+        code, out, err = captured(self.sb, ["--json"], patches=state_write_fails(self.sb))
+        self.assertEqual(code, 1, out + err)
+        got = [json.loads(line) for line in out.splitlines()]
+        self.assertEqual(got[-1]["exit"], 1, "the report is printed")
+        detail = " ".join(r.get("detail", "") for r in got[:-1])
+        self.assertIn("~/.local/state/agent-sync/state.json", detail)
+        self.assertIn("~/.gemini/config/skills/review-note", detail)
+        r = self.sb.run("--json")
+        self.assertEqual(r.returncode, 0, r.stdout)
+        self.assertEqual(find(rows(r)[0], "agy", "review-note")[0]["result"], "unchanged",
+                         "a folder holding exactly what would be copied is recorded, not held")
+
+    def test_r2_b3_a_failed_state_write_after_prune_is_reported(self):
+        self.sb.manifest('version = 1\nharnesses = ["agy"]\n')
+        code, out, _ = captured(self.sb, ["--prune", "--json"],
+                                patches=state_write_fails(self.sb))
+        self.assertEqual(code, 1, out)
+        self.assertIn("state file could not be written", out)
+
+    def test_r2_b3_a_failed_state_write_in_cleanup_and_restore_names_the_paths(self):
+        self.sb.close()
+        self.sb = support.Sandbox()
+        self.addCleanup(self.sb.close)
+        flat = claude_flat_copy(self)
+        code, out, _ = captured(self.sb, ["cleanup", "--yes", "deploying-apps"],
+                                patches=state_write_fails(self.sb))
+        self.assertEqual(code, 1, out)
+        self.assertIn("state file could not be written", out)
+        self.assertIn("~/.claude/skills/deploying-apps", out)
+        self.assertFalse(os.path.exists(flat))
+
+    def test_r2_b3_the_copied_row_survives_an_interrupt_at_the_swap(self):
+        scenario.write_skill(self.src, "review-note", "new")
+        dest = os.path.join(self.sb.agy_skills, "review-note")
+        real = A._rename
+
+        def rename(a, b):
+            real(a, b)
+            if b == dest:
+                os.kill(os.getpid(), signal.SIGINT)
+
+        code, out, _ = captured(self.sb, ["--json"], patches=[("_rename", rename)])
+        self.assertEqual(code, 130)
+        self.assertTrue(find([json.loads(x) for x in out.splitlines()[:-1]], "agy",
+                             "review-note", "copied"), out)
+
+
+class Review2Prune(support.SandboxCase, unittest.TestCase):
+    """B4: prune acts only on a selection it could read completely."""
+
+    def test_r2_b4_an_identical_source_switch_moves_ownership_and_prune_keeps_it(self):
+        url1, _ = git_market(self.sb, "first-market", 3)
+        url2, _ = git_market(self.sb, "second-market", 4)
+        agy_market(self.sb, "first-market", url1)
+        self.assertEqual(self.sb.run().returncode, 0)
+        agy_market(self.sb, "second-market", url2)
+        self.assertEqual(self.sb.run().returncode, 0)
+        self.assertEqual(read_state(self.sb)["agy"]["framing-ideas"]["source"],
+                         "planning@second-market")
+        del self.sb.config["remotes"][url2]
+        self.sb.save_config()
+        r = self.sb.run("--prune", "--json")
+        self.assertEqual(r.returncode, 1, r.stdout)
+        self.assertTrue(os.path.isdir(os.path.join(self.sb.agy_skills, "framing-ideas")))
+
+    def test_r2_b4_a_switch_to_a_source_that_fails_in_the_same_run_prunes_nothing(self):
+        url1, _ = git_market(self.sb, "first-market", 3)
+        agy_market(self.sb, "first-market", url1)
+        self.assertEqual(self.sb.run().returncode, 0)
+        agy_market(self.sb, "second-market", "https://example.invalid/review-test/absent.git")
+        r = self.sb.run("--prune", "--json")
+        self.assertEqual(r.returncode, 1, r.stdout)
+        self.assertTrue(os.path.isdir(os.path.join(self.sb.agy_skills, "framing-ideas")))
+        self.assertIn("framing-ideas", read_state(self.sb)["agy"])
+
+    def test_r2_b4_a_skill_folder_that_became_a_dangling_link_is_not_a_removal(self):
+        checkout = scenario.setup(self.sb, harnesses='["agy"]')
+        self.assertEqual(self.sb.run().returncode, 0)
+        skill = os.path.join(checkout, "plugins", "planning", "skills", "framing-ideas")
+        os.rename(skill, os.path.join(self.sb.home, "offline-source"))
+        os.symlink(os.path.join(self.sb.home, "absent-source"), skill)
+        r = self.sb.run("--prune", "--json")
+        self.assertEqual(r.returncode, 1, r.stdout)
+        self.assertTrue(os.path.isdir(os.path.join(self.sb.agy_skills, "framing-ideas")))
+        self.assertIn("is a symlink",
+                      find(rows(r)[0], "agy", "planning@example-skills")[0]["detail"])
+
+
+class Review2Sources(support.SandboxCase, unittest.TestCase):
+    """B5: a marketplace and a loose skill never share a cache, a memo or a stale origin."""
+
+    def test_r2_b5_a_loose_skill_never_reuses_a_marketplace_cache_of_the_same_key(self):
+        url1, tree1 = git_market(self.sb, "skill-review-note", 3)
+        url2, tree2 = git_market(self.sb, "loose-source", 4)
+        for tree, body in ((tree1, "wrong repository"), (tree2, "requested repository")):
+            scenario.write_skill(os.path.join(tree, "notes", "review-note"), "review-note", body)
+        agy_market(self.sb, "skill-review-note", url1,
+                   '[[skill]]\nname = "review-note"\ngit = "%s"\nref = "main"\n'
+                   'subdir = "notes/review-note"\n' % url2)
+        r = self.sb.run("--json")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        with open(os.path.join(self.sb.agy_skills, "review-note", "SKILL.md")) as f:
+            self.assertIn("requested repository", f.read())
+        self.assertTrue(any(url2 in a for a in self.sb.argvs("git")))
+
+    def test_r2_b5_names_that_differ_only_in_case_are_a_manifest_error(self):
+        url1, _ = git_market(self.sb, "first-market", 3)
+        self.sb.manifest('version = 1\nharnesses = ["agy"]\n'
+                         '[[marketplace]]\nname = "Market"\ngit = "%s"\nharnesses = ["agy"]\n'
+                         '[[marketplace]]\nname = "market"\ngit = "%s"\nharnesses = ["agy"]\n'
+                         % (url1, url1))
+        self.assertEqual(self.sb.run().returncode, 2)
+
+    def test_r2_b5_a_dry_run_never_reads_a_cache_cloned_from_another_url(self):
+        url1, tree1 = git_market(self.sb, "first-market", 3)
+        url2, _ = git_market(self.sb, "first-market-moved", 4)
+        agy_market(self.sb, "first-market", url1)
+        self.assertEqual(self.sb.run().returncode, 0)
+        agy_market(self.sb, "first-market", url2)
+        got, _ = rows(self.sb.run("--dry-run", "--json"))
+        self.assertEqual(find(got, "agy", "marketplace first-market")[0]["result"], "unchecked")
+        self.assertEqual(find(got, "agy", "planning/framing-ideas"), [])
+
+
+class Review2Cleanup(support.SandboxCase, unittest.TestCase):
+    """B6: a candidate that changed after it was shown is shown again, never archived unseen."""
+
+    def test_r2_b6_a_copy_edited_while_the_prompt_is_open_is_not_archived(self):
+        flat = claude_flat_copy(self)
+
+        class Typing:
+            def readline(self):
+                scenario.write_skill(flat, "deploying-apps", "unique changes while waiting")
+                return "a\n"
+
+        code, out, _ = captured(self.sb, ["cleanup"], stdin=Typing())
+        self.assertIn("changed since it was shown", out)
+        self.assertTrue(os.path.isdir(flat), out)
+        self.assertEqual(read_state(self.sb)["cleanup"], {})
+
+    def test_r2_b6_a_copy_edited_before_a_yes_move_is_not_archived(self):
+        flat = claude_flat_copy(self)
+        real = A.ensure_dir
+
+        def edit(path, **k):
+            if path == os.path.dirname(flat):
+                scenario.write_skill(flat, "deploying-apps", "edited before the move")
+            return real(path, **k)
+
+        code, out, _ = captured(self.sb, ["cleanup", "--yes", "deploying-apps"],
+                                patches=[("ensure_dir", edit)])
+        self.assertEqual(code, 1, out)
+        self.assertIn("changed since it was shown", out)
+        self.assertTrue(os.path.isdir(flat))
+
+
+class Review2Transfer(support.SandboxCase, unittest.TestCase):
+    """B7: a cross-volume move removes only what it created itself."""
+
+    def test_r2_b7_another_writers_destination_survives_a_failed_transfer(self):
+        for when in ("before the copy", "after the copy"):
+            with self.subTest(when=when):
+                src = os.path.join(self.sb.home, "source-" + when.split()[0])
+                dst = os.path.join(self.sb.home, "slot-" + when.split()[0])
+                os.makedirs(src)
+                with open(os.path.join(src, "content"), "w") as f:
+                    f.write("original")
+                real = shutil.copytree
+
+                def collide(source, target, *a, **k):
+                    def other():
+                        os.makedirs(dst)
+                        with open(os.path.join(dst, "keep-me"), "w") as f:
+                            f.write("another writer's data")
+                    if when == "before the copy":
+                        other()
+                    result = real(source, target, *a, **k)
+                    if when == "after the copy":
+                        other()
+                    return result
+
+                shutil.copytree = collide
+                try:
+                    with self.sb.active(), self.assertRaises((OSError, A.TreeError)):
+                        A.transfer(src, dst)
+                finally:
+                    shutil.copytree = real
+                with open(os.path.join(dst, "keep-me")) as f:
+                    self.assertEqual(f.read(), "another writer's data")
+                self.assertEqual(os.listdir(dst), ["keep-me"])
+                self.assertTrue(os.path.isfile(os.path.join(src, "content")))
+                self.assertEqual([n for n in os.listdir(self.sb.home)
+                                  if "partial" in n], [], "no staging folder is left")
+
+
+class Review2Homes(support.SandboxCase, unittest.TestCase):
+    """B8, SF1: no first command reaches a home agent-sync has not cleared."""
+
+    def test_r2_b8_agy_is_not_called_when_its_home_is_a_symlink(self):
+        for args in ([], ["--dry-run"]):
+            with self.subTest(args=args):
+                self.sb.close()
+                self.sb = support.Sandbox()
+                self.sb.manifest('version = 1\nharnesses = ["agy"]\n')
+                outside = os.path.join(self.sb.home, "unrelated")
+                os.makedirs(outside)
+                os.symlink(outside, os.path.join(self.sb.home, ".gemini"))
+                r = self.sb.run("--json", *args)
+                self.assertEqual(self.sb.argvs("agy"), [])
+                self.assertEqual(os.listdir(outside), [])
+                self.assertIn(".gemini is a symlink", r.stdout)
+        self.addCleanup(lambda: self.sb.close())
+
+    def test_r2_sf1_an_empty_home_is_not_called_in_a_dry_run_or_check(self):
+        scenario.setup(self.sb, harnesses='["claude", "codex"]')
+        self.assertEqual(os.listdir(self.sb.codex_home), [])
+        self.assertEqual(os.listdir(self.sb.claude_home), [])
+        for mode in ("--dry-run", "--check"):
+            with self.subTest(mode=mode):
+                self.sb.clear_calls()
+                r = self.sb.run(mode, "--json")
+                self.assertEqual(self.sb.calls("codex") + self.sb.calls("claude"), [])
+                got, _ = rows(r)
+                for h in ("claude", "codex"):
+                    self.assertIn("home not initialised", find(got, h, "%s CLI" % h)[0]["detail"])
+                self.assertEqual(os.listdir(self.sb.codex_home), [])
+
+
+class Review2Observations(support.SandboxCase, unittest.TestCase):
+    """SF2, SF3, SF4: what a harness reports is checked, kept apart, and compared fully."""
+
+    def test_r2_sf2_check_stays_red_after_a_held_plugin_update(self):
+        scenario.setup(self.sb, harnesses='["claude"]')
+        self.assertEqual(self.sb.run().returncode, 0)
+        scenario.move_remote(self.sb, scenario.VURL, "v2.3.0",
+                             os.path.join(support.FIXTURES, "catalog-shared"), support.sha(8))
+        pid = "editor-integration@example-vendor-plugins"
+        self.sb.set("claude", "held", {pid: {"command": "fixture command", "sha256": "f" * 64}})
+        held = self.sb.run("--json")
+        self.assertEqual(held.returncode, 3, held.stdout)
+        r = self.sb.run("--check", "--json")
+        self.assertEqual(r.returncode, 1, r.stdout)
+        self.assertEqual(find(rows(r)[0], "claude", pid)[0]["result"], "unchecked")
+        accepted = self.sb.run("--accept-command", pid + "=" + "f" * 64, "--json")
+        self.assertEqual(accepted.returncode, 0, accepted.stdout)
+        self.assertEqual(self.sb.run("--check").returncode, 0)
+
+    def test_r2_sf3_a_malformed_list_entry_fails_that_harness_and_the_rest_runs(self):
+        scenario.setup(self.sb, harnesses='["claude", "agy"]')
+        self.assertEqual(self.sb.run().returncode, 0)
+        path = os.path.join(self.sb.claude_home, "fake-state.json")
+        with open(path) as f:
+            data = json.load(f)
+        data["plugins"].append({"scope": "user", "enabled": True})
+        with open(path, "w") as f:
+            json.dump(data, f)
+        self.sb.clear_calls()
+        r = self.sb.run("--json")
+        self.assertNotIn("Traceback", r.stderr)
+        self.assertTrue(self.sb.argvs("agy"), "agy still runs")
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertEqual(find(rows(r)[0], "claude", "claude CLI")[0]["result"], "failed")
+
+    def test_r2_sf3_a_malformed_agy_list_fails_agy_only(self):
+        scenario.setup(self.sb, harnesses='["claude", "agy"]')
+        self.sb.set("agy", "plugins", [{"name": "x", "skills": "not a list"}])
+        r = self.sb.run("--json")
+        self.assertNotIn("Traceback", r.stderr)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        got, _ = rows(r)
+        self.assertEqual(find(got, "agy", "agy CLI")[0]["result"], "failed")
+        self.assertTrue(find(got, "claude", "planning@example-skills"))
+
+    def test_r2_sf4_a_skill_dropped_from_the_declaration_leaves_the_cache_stale(self):
+        scenario.setup(self.sb, harnesses='["codex"]')
+        manifest = os.path.join(self.sb.config_home, "agent-sync", "manifest.toml")
+        with open(manifest) as f:
+            text = f.read()
+        self.sb.manifest(text.replace('codex     = "git"\nagy', 'codex     = "checkout"\nagy', 1))
+        self.assertEqual(self.sb.run().returncode, 0)
+        path = os.path.join(self.sb.home, "src", "example-skills", "plugins", "reviewing",
+                            ".claude-plugin", "plugin.json")
+        with open(path) as f:
+            doc = json.load(f)
+        doc["skills"].remove("./skills/reviewing-tests")
+        with open(path, "w") as f:
+            json.dump(doc, f)
+        r = self.sb.run("--check", "--json")
+        self.assertEqual(r.returncode, 1, r.stdout)
+        self.assertEqual(find(rows(r)[0], "codex", "reviewing@example-skills")[0]["result"],
+                         "stale")
 
 
 if __name__ == "__main__":

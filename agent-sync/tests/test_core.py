@@ -149,7 +149,8 @@ class InstallTree(support.SandboxCase, unittest.TestCase):
 
         def cross_device(a, b):
             seen.append(b)
-            if b == self.archive:
+            # The archive is another volume: only a rename from beside it stays on it.
+            if b == self.archive and os.path.dirname(a) != os.path.dirname(b):
                 raise OSError(18, "Cross-device link")  # EXDEV
             return self.rename(a, b)
 

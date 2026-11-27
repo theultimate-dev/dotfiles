@@ -17,6 +17,7 @@ class Plan(support.SandboxCase, unittest.TestCase):
     def setUp(self):
         super().setUp()
         self.checkout = scenario.setup(self.sb, harnesses='["claude", "codex"]')
+        self.sb.used()
 
     def test_missing_marketplace_is_added_and_missing_plugin_installed(self):
         r = self.sb.run("--json")
@@ -201,6 +202,7 @@ class Enrolment(support.SandboxCase, unittest.TestCase):
     def setUp(self):
         super().setUp()
         self.checkout = scenario.setup(self.sb, harnesses='["claude", "codex"]')
+        self.sb.used()
 
     def installed(self, cmd):
         return sorted(a[-1] for a in self.sb.argvs(cmd) if a[:2] in (["plugin", "install"],

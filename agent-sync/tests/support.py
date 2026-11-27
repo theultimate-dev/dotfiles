@@ -76,6 +76,13 @@ class Sandbox:
                     % (sys.executable, FAKES, name))
         os.chmod(path, 0o755)
 
+    def used(self, *homes):
+        """Give each harness home a file, as a harness that has run once leaves: an empty home
+        is uninitialised, and a dry run or --check does not call its harness (spec §8)."""
+        for h in homes or (self.claude_home, self.codex_home):
+            with open(os.path.join(h, "history.jsonl"), "w") as f:
+                f.write("")
+
     def remove_fake(self, name):
         os.remove(os.path.join(self.bin, name))
 
