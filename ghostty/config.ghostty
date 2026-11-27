@@ -75,7 +75,7 @@ desktop-notifications = true
 # once and counts up a badge while Ghostty is unfocused, and prefixes 🔔 to
 # the pane title. That badge is what you see when the notification itself was
 # already dismissed. Once alerts are set to Persistent (docs/manual-setup.md,
-# step 4) the badge is redundant; uncomment to keep only the notification:
+# step 5) the badge is redundant; uncomment to keep only the notification:
 # bell-features = no-attention,no-title
 
 # ── Quick terminal ────────────────────────────────

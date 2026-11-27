@@ -187,7 +187,7 @@ The one there today is [herdr-radar](https://github.com/hhdebb/herdr-radar), whi
 sidebar into a list you can read at a glance: who is working, who is waiting on you, who went
 quiet. Its own settings are tracked in `herdr/plugins/hhdebb.herdr-radar/config.toml`. That file
 and [`herdr/config.toml`](../herdr/config.toml) reach a Mac by hand or through a coding agent, never
-through a script — see [step 3 of the manual setup](manual-setup.md#3-configure-herdr), and
+through a script — see [step 4 of the manual setup](manual-setup.md#4-configure-herdr), and
 [ADR 0013](decisions/0013-apply-the-herdr-config-by-hand.md) for why.
 
 - **Converging on the pin:** a plugin that `herdr plugin list` already shows at the pinned commit is
@@ -205,7 +205,7 @@ through a script — see [step 3 of the manual setup](manual-setup.md#3-configur
   one on the `^{}` line, not the tag object above it.
 - **A running Herdr keeps the old version** of a plugin until Herdr restarts. herdr-radar can
   switch without ending anything running in your panes: its `state-restart` action restarts only
-  its own process, the way part three of [step 3](manual-setup.md#3-configure-herdr) runs it.
+  its own process, the way part three of [step 4](manual-setup.md#4-configure-herdr) runs it.
 - **Node, not Python:** the pinned plugins run on Node 18 or newer, which this repository does not
   install yet. `setup.sh` warns when `node` is missing from `PATH`.
 
@@ -215,7 +215,7 @@ rows. If that file has no `[ui]` header line, it refuses, says so in a notificat
 to miss, and still records its first-run setup as done. No later start retries, so the sidebar
 stays Herdr's own and nothing says why. [`herdr/config.toml`](../herdr/config.toml) carries the
 `[ui]` line; with it in place, the plugin's `configure` action writes the blocks, which part three
-of [step 3](manual-setup.md#3-configure-herdr) runs once for exactly this reason.
+of [step 4](manual-setup.md#4-configure-herdr) runs once for exactly this reason.
 
 **What herdr-radar writes outside Herdr's own directories:** its icon font, into
 `~/Library/Fonts`, and a `# >>> herdr-radar font block` of `font-codepoint-map` lines appended to
@@ -233,6 +233,19 @@ The installer, which warns about any non-empty file there because a `config-file
 it makes Ghostty report a cycle, then prints `… is non-empty; Ghostty loads it too` and still
 passes. If that file holds nothing but the plugin's block, deleting it silences the warning for
 good: the plugin writes only into files that exist.
+
+---
+
+## Plugins and skills across the harnesses
+
+The harnesses this file installs each keep their own plugins and skills, and keeping them in step
+by hand drifts without anyone seeing it. `scripts/agent-sync` reads a per-machine manifest and
+installs the plugins it names through Claude Code's and Codex's own plugin commands. It copies
+the skills it selects into Antigravity's personal skills folder and reports any skill that a
+harness can reach twice. Like `setup.sh`, it writes no harness settings file. Unlike `setup.sh`,
+you run it by hand, because it can stop to ask you to accept a command or adopt a folder. See
+[agent-sync](agent-sync.md) for the mechanism and its traps, and
+[manual setup, step 3](manual-setup.md#3-sync-agent-plugins-and-skills) to start using it.
 
 ---
 

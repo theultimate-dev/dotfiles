@@ -15,17 +15,18 @@ expands it for you.
 macOS only. Git push defaults additionally need **git 2.37 or newer** — check with `git --version`,
 because on older git the settings `install.sh` activates are silently inert.
 
-**What gets written.** Five files outside this repo by hand, and nothing else. No step creates a
-symlink, and no step overwrites a file holding settings of yours — step 3 replaces Herdr's config
+**What gets written.** Six files outside this repo by hand, and nothing else. No step creates a
+symlink, and no step overwrites a file holding settings of yours — step 4 replaces Herdr's config
 only while it holds nothing but the `onboarding = false` Herdr's first run writes:
 
 | Path | Step | Action | Present today? |
 |---|---|---|---|
-| `~/.config/herdr/config.toml` | 3 | copied from `herdr/`, or merged | absent until Herdr first runs |
-| `~/.config/herdr/plugins/config/hhdebb.herdr-radar/config.toml` | 3 | copied from `herdr/`, or merged | absent until you save herdr-radar's settings |
-| `~/.claude/settings.json` | 3 | one key added | present if Claude Code is installed |
-| `~/.grok/config.toml` | 5 | edited only if the collision fires | conditional |
-| `~/.docker/config.json` | 6 | one key added; Colima then sets the current context, defined in `~/.docker/contexts/` | absent until Docker or Colima first runs |
+| `~/.config/agent-sync/manifest.toml` | 3 | copied from `agent-sync/`, then edited | absent |
+| `~/.config/herdr/config.toml` | 4 | copied from `herdr/`, or merged | absent until Herdr first runs |
+| `~/.config/herdr/plugins/config/hhdebb.herdr-radar/config.toml` | 4 | copied from `herdr/`, or merged | absent until you save herdr-radar's settings |
+| `~/.claude/settings.json` | 4 | one key added | present if Claude Code is installed |
+| `~/.grok/config.toml` | 6 | edited only if the collision fires | conditional |
+| `~/.docker/config.json` | 7 | one key added; Colima then sets the current context, defined in `~/.docker/contexts/` | absent until Docker or Colima first runs |
 
 `install.sh` in step 1 additionally writes three managed blocks — the include stubs
 `~/.config/git/config` and `~/.config/ghostty/config.ghostty`, and an `export` of `YAZI_CONFIG_HOME`
@@ -36,8 +37,11 @@ configuration directory. The one exception is the Herdr plugin `setup.sh` instal
 icon font into `~/Library/Fonts` and appends a block of its own, fenced by `herdr-radar` markers,
 to each Ghostty config file that already exists, `~/.config/ghostty/config.ghostty` among them —
 see [Herdr plugins](agent-tooling.md#herdr-plugins) for the full list and the `./install.sh
---check` warning it can cause. Step 6 creates Colima's VM in Colima's own `~/.colima` and caches
-its image in `~/Library/Caches/colima`. Steps 2 and 4 are interactive — a browser login, a
+--check` warning it can cause. Step 3 runs `scripts/agent-sync`, which asks Claude Code and Codex
+to install plugins through their own commands, copies skills into `~/.gemini/config/skills/`, and
+keeps its own state, archive and Git cache under `~/.local/state/agent-sync/` and
+`~/.cache/agent-sync/`. Step 7 creates Colima's VM in Colima's own `~/.colima` and caches
+its image in `~/Library/Caches/colima`. Steps 2 and 5 are interactive — a browser login, a
 settings pane — and have no terminal equivalent.
 
 **Snapshot.** Do this once, before step 1. It is the difference between "I changed something" and
@@ -47,6 +51,7 @@ settings pane — and have no terminal equivalent.
 mkdir -p ~/.dotfiles-backup
 
 for f in ~/.config/herdr/config.toml ~/.claude/settings.json ~/.grok/config.toml \
+         ~/.config/agent-sync/manifest.toml \
          ~/.config/ghostty/config.ghostty ~/.zshenv \
          ~/.config/hunk/config.toml ~/.docker/config.json \
          ~/.config/herdr/plugins/config/hhdebb.herdr-radar/config.toml; do
@@ -81,9 +86,9 @@ known-good state than from a half-applied one.
 the file outright if the loop above reported it absent. Each step below names its own.
 
 **Order.** Steps 1 and 2 run in sequence — you cannot log in to a tool that is not installed yet.
-Steps 3 to 6 are independent of each other and of the first two: run them in any order, or skip
-the ones you do not want. (Steps 3, 5 and 6 configure tools that step 1 installs; if you skipped
-step 1 there is simply nothing there to configure.)
+Steps 3 to 7 are independent of each other: run them in any order, or skip the ones you do not
+want. (They configure tools that steps 1 and 2 install, and step 3 needs the agents signed in; if
+you skipped those, there is simply nothing there to configure.)
 
 ---
 
@@ -168,7 +173,7 @@ cp -p ~/.dotfiles-backup/zshenv ~/.zshenv       # the ~/.zshenv from before the 
 ```
 
 Run the `herdr` lines while Herdr is still installed, and after the undo of
-[step 3](#3-configure-herdr) if you did that step: the plugin has to take its blocks out of Herdr's
+[step 4](#4-configure-herdr) if you did that step: the plugin has to take its blocks out of Herdr's
 config before it goes. If `~/.zshenv` did not exist before, delete it instead of restoring it; the
 snapshot loop above reported which. Yazi's plugin code is inside the repo under `yazi/plugins/`,
 untracked, and goes away with the clone.
@@ -357,11 +362,99 @@ and no identity at all — see [Public-repo hygiene](../AGENTS.md#public-repo-hy
 
 ---
 
-## 3. Configure Herdr
+## 3. Sync agent plugins and skills
+
+**What you get.** Claude Code and Codex holding the plugins you list, installed through their own
+plugin commands; Antigravity holding copies of the skills you pick from them, in its personal
+skills folder; and one report of what changed, what was already current and what needs you. Each
+skill reaches a harness once: the cleanup at the end archives the older flat copies that shadow a
+plugin.
+
+This step needs step 2 done, and a Python 3.11 or newer on `$PATH` as `python3`; step 1's
+`Brewfile` installs one. Check with `python3 --version`. A `scripts/` entry on `$PATH` is still
+planned, so every command below calls the script by its path.
+
+**Do this.** First, the manifest. It is yours, untracked, and starts as a copy of the commented
+example; the copy refuses to overwrite one that is already there:
+
+```sh
+mkdir -p ~/.config/agent-sync
+if [ -e ~/.config/agent-sync/manifest.toml ]; then
+  echo "kept: ~/.config/agent-sync/manifest.toml exists; edit it instead"
+else
+  cp <repo>/agent-sync/manifest.example.toml ~/.config/agent-sync/manifest.toml
+fi
+```
+
+Edit `~/.config/agent-sync/manifest.toml`: name your marketplaces, their Git sources and the paths
+of your checkouts, and the plugins you want. The comments in it explain every key. Then look
+before anything changes, and read the whole report:
+
+```sh
+<repo>/scripts/agent-sync --dry-run
+```
+
+Nothing is written and nothing is fetched. Each `unchecked` row shows the exact command a run
+would execute. When the plan is what you meant, run it:
+
+```sh
+<repo>/scripts/agent-sync
+```
+
+A `held` row waits for you and names the flag that releases it: `--accept-command <plugin>=<hash>`
+for a command a catalog declares, after you have read it, or `--adopt <name>` for an agy folder
+agent-sync did not create, which it archives first. Re-run with that flag. A `stale` row is a Codex
+cache that differs from its source; `--repair` reinstalls exactly those plugins.
+
+Then, once, the duplicates already on this machine. Look first, then answer for each folder:
+
+```sh
+<repo>/scripts/agent-sync cleanup --dry-run
+<repo>/scripts/agent-sync cleanup
+```
+
+Every yes moves a folder into the archive. Nothing is deleted. The last line prints the
+`--restore` command for this cleanup run; keep it.
+
+**Verify.** Run it again:
+
+```sh
+<repo>/scripts/agent-sync --check
+```
+
+It exits 0 and its summary reads `0 changed` with no `duplicate` row. Then start a fresh session in
+each harness, run `/skills reload` first in agy, and open its list of skills: a skill from a
+managed plugin appears once.
+
+**Undo.** Each part has its own:
+
+- **The cleanup:** run the `--restore` line it printed, as
+  `<repo>/scripts/agent-sync cleanup --restore <timestamp>`. Add `--dry-run` first to see what
+  it would move.
+- **An agy copy:** delete `~/.gemini/config/skills/<name>/`. Where a run replaced a folder, its
+  `copied` row names where the previous copy went in
+  `~/.local/state/agent-sync/archive/<timestamp>/agy/`; move that folder back instead.
+- **A plugin:** agent-sync never uninstalls. Use the harness's own command:
+  `claude plugin uninstall <plugin>@<marketplace>` and `claude plugin marketplace remove <name>`
+  for Claude Code, `codex plugin remove <plugin>@<marketplace>` and
+  `codex plugin marketplace remove <name>` for Codex.
+- **agent-sync itself:** delete `~/.config/agent-sync/`, `~/.cache/agent-sync/` and, once nothing
+  in its archive is wanted, `~/.local/state/agent-sync/`.
+
+**Why it works this way.** agent-sync drives each harness through its own CLI and writes no harness
+settings file, and agy is the one harness that gets copies, because it cannot follow a third-party
+catalog. See [agent-sync](agent-sync.md) for each trap, and
+[ADR 0014](decisions/0014-sync-agent-plugins-through-their-own-clis.md).
+
+---
+
+<a id="3-configure-herdr"></a>
+
+## 4. Configure Herdr
 
 **What you get.** Herdr set up from this repo's `herdr/` directory. A macOS notification when an
 agent in any Herdr pane finishes or needs input, carrying your terminal's icon, with a click that
-raises the terminal and `prefix+g` that jumps to the pane behind it; step 4 is what makes it stay
+raises the terminal and `prefix+g` that jumps to the pane behind it; step 5 is what makes it stay
 on screen. And [herdr-radar](https://github.com/hhdebb/herdr-radar), the plugin step 1 installed,
 drawing the sidebar's Agents list: who is working and who is waiting on you, grouped by project,
 with `prefix+a` flipping its order and `prefix+comma` opening its settings.
@@ -454,7 +547,7 @@ Herdr put there.
 agent at the parts above rather than repeating them, so the two cannot drift apart:
 
 ```text
-Apply this repository's Herdr configuration to this Mac. Follow parts one to three of step 3 in
+Apply this repository's Herdr configuration to this Mac. Follow parts one to three of step 4 in
 docs/manual-setup.md, from the repository root, and do nothing that step does not describe.
 
 - Where a destination file already holds settings, merge by the rules written in that step.
@@ -500,8 +593,8 @@ Then the live test for notifications:
 herdr notification show "test" --body "hello" --sound done
 ```
 
-A notification appears carrying your terminal's icon; until step 4 is done it leaves again after a
-few seconds. If nothing appears at all, do step 4. If the icon is a script or scroll and clicking it
+A notification appears carrying your terminal's icon; until step 5 is done it leaves again after a
+few seconds. If nothing appears at all, do step 5. If the icon is a script or scroll and clicking it
 opens Finder, `terminal-notifier` is missing — go back to step 1.
 
 **Undo.**
@@ -529,9 +622,11 @@ replaces it — see [The four delivery modes](herdr-notifications.md#the-four-de
 
 ---
 
-## 4. Allow notifications and make them stay on screen
+<a id="4-allow-notifications-and-make-them-stay-on-screen"></a>
 
-**What you get.** The notifications from step 3 actually appear, and they stay on screen until you
+## 5. Allow notifications and make them stay on screen
+
+**What you get.** The notifications from step 4 actually appear, and they stay on screen until you
 dismiss them instead of leaving after a few seconds. Until the first toggle is on, everything is
 configured correctly and nothing shows up; until the second, a banner shows and is gone before you
 look up. Both are the most confusing failures in this guide.
@@ -547,7 +642,7 @@ Find **terminal-notifier** in the application list, turn **Allow Notifications**
 **Ghostty**, which is the sender on the days you run an agent outside Herdr.
 
 An entry only appears once the app has tried to notify at least once. If `terminal-notifier` is
-missing, run the live test from step 3 and look again; if Ghostty is missing, run this in a Ghostty
+missing, run the live test from step 4 and look again; if Ghostty is missing, run this in a Ghostty
 pane that is not inside Herdr, switch to another app for a moment, and look again:
 
 ```sh
@@ -583,7 +678,9 @@ installer sets it — see
 
 ---
 
-## 5. Known collisions to check
+<a id="5-known-collisions-to-check"></a>
+
+## 6. Known collisions to check
 
 Conditional. Do each of these only if its check fires. `setup.sh` detects the first and warns;
 neither touches a file this repo manages, which is why neither is fixed for you.
@@ -640,7 +737,9 @@ them instead of acting — see
 
 ---
 
-## 6. Run containers with Colima
+<a id="8-run-containers-with-colima"></a>
+
+## 7. Run containers with Colima
 
 **What you get.** `docker`, `docker compose` and `docker buildx` working against Colima's Linux VM,
 sized for several Compose stacks at once, with file watchers inside containers seeing the edits
@@ -733,10 +832,11 @@ The rest stays, and stays here:
 |---|---|
 | [1. Install the tools and place configs](#1-install-the-tools-and-place-configs) | the two-script split: `setup.sh` needs the network, `install.sh` may not |
 | [2. Install and authenticate the coding agents](#2-install-and-authenticate-the-coding-agents) | interactive OAuth; nothing types a password into a browser for you |
-| [3. Configure Herdr](#3-configure-herdr) | Herdr's config file is also written by Herdr and herdr-radar; kept in `herdr/` and applied by hand per ADR 0013 |
-| [4. Allow notifications and make them stay on screen](#4-allow-notifications-and-make-them-stay-on-screen) | two GUI toggles only you can flip |
-| [5. Known collisions to check](#5-known-collisions-to-check) | detection is automatable; the remedy edits files this repo does not manage |
-| [6. Run containers with Colima](#6-run-containers-with-colima) | the VM's size is a choice per machine; Colima's config is unmanaged per ADR 0005, and `config.json` is Docker's own |
+| [3. Sync agent plugins and skills](#3-sync-agent-plugins-and-skills) | needs Python, the network and signed-in agents, and can stop to ask you; `install.sh` is offline and `setup.sh` should not stop to ask — see ADR 0014 |
+| [4. Configure Herdr](#4-configure-herdr) | Herdr's config file is also written by Herdr and herdr-radar; kept in `herdr/` and applied by hand per ADR 0013 |
+| [5. Allow notifications and make them stay on screen](#5-allow-notifications-and-make-them-stay-on-screen) | two GUI toggles only you can flip |
+| [6. Known collisions to check](#6-known-collisions-to-check) | detection is automatable; the remedy edits files this repo does not manage |
+| [7. Run containers with Colima](#7-run-containers-with-colima) | the VM's size is a choice per machine; Colima's config is unmanaged per ADR 0005, and `config.json` is Docker's own |
 
 One rule outlives the prune: **a command that writes to `$HOME` appears exactly once in this
 repository.** If a procedure ever comes back out of `install.sh`, it comes back to this file — not

@@ -29,6 +29,10 @@ docs/assets/hero.png and replace this comment with:
 - **"Your agent finished" notifications that survive a multiplexer** — one setting that reaches
   Claude Code in Ghostty and in [Herdr](https://herdr.dev), and still rings the bell in a terminal
   that never parses the notification sequence.
+- **The same skills in every coding agent** — `scripts/agent-sync` reads one manifest of your
+  own and installs the plugins it lists into Claude Code and Codex through their own plugin
+  commands, copies the skills you pick into Antigravity, and reports any skill an agent can reach
+  twice. It writes no agent settings file and never uninstalls anything.
 - **One command for the tools** — a `Brewfile` covering Ghostty, Herdr, Yazi, hunk, micro, Leaf,
   the GitHub CLI, Colima with the Docker CLI, and three coding-agent CLIs, and a `setup.sh` that
   installs it convergently.
@@ -234,7 +238,9 @@ manual — see [Manual setup](docs/manual-setup.md).
 | `ghostty/` | Managed Ghostty configuration |
 | `yazi/` | Managed Yazi configuration; `plugins/` inside it is restored by `setup.sh` and untracked |
 | `hunk/` | Managed hunk configuration; copied to its destination rather than included |
-| `herdr/` | Herdr configuration, plugin pins and plugin settings; applied by hand — [manual setup, step 3](docs/manual-setup.md#3-configure-herdr) |
+| `herdr/` | Herdr configuration, plugin pins and plugin settings; applied by hand — [manual setup, step 4](docs/manual-setup.md#4-configure-herdr) |
+| `agent-sync/` | The commented example manifest for `scripts/agent-sync`, and its tests |
+| `scripts/` | `agent-sync`, run by its path for now — planned: added to `$PATH` |
 | [`renovate.json`](renovate.json) | Renovate, limited to bumping the Herdr plugin pins; Dependabot keeps the GitHub Actions |
 | [`LICENSE`](LICENSE) | MIT — see [Licence and scope](#licence-and-scope) |
 | `docs/` | Deep dives on the pieces whose reasoning is not obvious from the code |
@@ -256,6 +262,11 @@ manual — see [Manual setup](docs/manual-setup.md).
 - [Agent tooling & installation](docs/agent-tooling.md) — why Homebrew is used for all daily tools,
   how `auto_updates` casks behave, the Herdr integration lifecycle and plugin pins, and how to avoid
   installer traps when juggling multiple coding agents on macOS.
+- [agent-sync](docs/agent-sync.md) — one manifest for the plugins and skills of Claude Code,
+  Codex and Antigravity: what it asks each harness to do and what it refuses to do. Also: why a
+  Codex plugin cache can fall behind its source at the same version, why a catalog's declared
+  command waits for its hash, why Codex turns a stray word into a prompt, and how the one-time
+  cleanup removes the flat copies that shadow a plugin.
 - [hunk](docs/hunk.md) — a live diff pane for watching a coding agent edit the working tree as it
   happens, rather than reading the whole changeset afterwards, plus how to review a commit, a
   branch or a GitHub pull request with the same viewer. Also: why a read-only viewer beats a git

@@ -10,8 +10,9 @@ install it whole: the installer, the tool list, and the configuration for each t
 reasoning written down next to every choice that was not obvious.
 
 **Current state:** the installer, the git defaults, the Ghostty configuration, the Yazi
-configuration, the hunk configuration and the Herdr configuration are in; the shell configuration
-and the runtime versions follow. The delivery model below is not aspirational — it is in daily
+configuration, the hunk configuration, the Herdr configuration and `scripts/agent-sync`, which keeps
+the coding agents' plugins and skills in step, are in; the shell configuration and the runtime
+versions follow. The delivery model below is not aspirational — it is in daily
 use, and it is binding for every file that lands here.
 
 **macOS only.** It is the only platform anything here is developed or tested on. Do not add Linux
@@ -66,9 +67,16 @@ Planned, not yet delivered — listed so the mechanism is decided before the por
 
 One tracked configuration is deliberately absent from both tables: `herdr/`. Herdr's config file is
 also written by Herdr and by its herdr-radar plugin, so no script here writes it; a person or an
-agent copies or merges it by following `docs/manual-setup.md` step 3. See
+agent copies or merges it by following `docs/manual-setup.md` step 4. See
 [ADR 0013](docs/decisions/0013-apply-the-herdr-config-by-hand.md). `setup.sh` installs the pinned
 Herdr plugins through Herdr's own CLI, the way it installs Herdr's agent integrations.
+
+One destination is written by a script that no installer runs: `~/.gemini/config/skills/<name>/`.
+`scripts/agent-sync` copies the skills a per-machine manifest selects into it, as real folders that
+it records and archives before it replaces them, and only when you run it by hand — never from
+`install.sh` or `setup.sh`, because it needs the network and signed-in agents and can stop to ask
+you. Claude Code and Codex get plugins through their own CLIs, and agent-sync writes none of their
+files. See [ADR 0014](docs/decisions/0014-sync-agent-plugins-through-their-own-clis.md).
 
 This keeps the one property that made symlinks attractive — **the repo is the live source of truth,
 edits take effect with no reinstall, and `git diff` audits the whole configuration** — without the
@@ -241,8 +249,8 @@ Format is `type(scope): description`, per
 
 - **Descriptions are past tense** — `feat(zsh): added a notification for long-running commands`.
 - **Scope is optional but preferred**, naming the top-level directory or subject: `install`,
-  `setup`, `zsh`, `git`, `ghostty`, `yazi`, `hunk`, `herdr`, `scripts`, `brew`, `asdf`, `docs`,
-  `claude`.
+  `setup`, `zsh`, `git`, `ghostty`, `yazi`, `hunk`, `herdr`, `agent-sync`, `scripts`, `brew`,
+  `asdf`, `docs`, `claude`.
 - **One self-contained unit of work per commit.** Unrelated changes get their own commits; when the
   working tree mixes them, split rather than bundle.
 - **Breaking changes** — anything in the MAJOR row above — take a `!` after the type or scope *and*
@@ -297,6 +305,12 @@ bash -n install.sh setup.sh   # syntax check; no dependencies
 ```
 
 `shellcheck` is welcome but not required, and it does not replace `--dry-run` and `--check`.
+
+Every change to `scripts/agent-sync` must also pass:
+
+```bash
+python3 -m unittest discover -s agent-sync/tests   # against fake harnesses in a temporary home
+```
 
 ---
 
