@@ -40,6 +40,8 @@ import re  # noqa: E402
 import shutil  # noqa: E402
 import signal  # noqa: E402
 import subprocess  # noqa: E402
+import tempfile  # noqa: E402
+import threading  # noqa: E402
 import tomllib  # noqa: E402
 from dataclasses import dataclass, field  # noqa: E402
 
@@ -196,6 +198,9 @@ def parse_manifest(text, path):
         if m.git and not GIT_SOURCE.match(m.git):
             errors.append("%s: git %r is not owner/repo or an https/ssh Git URL" % (where, m.git))
         m.ref = _string(t, "ref", where, errors)
+        for key in ("git", "ref"):
+            if (getattr(m, key) or "").startswith("-"):
+                errors.append("%s: %s may not begin with -" % (where, key))
         if m.ref and not m.git:
             errors.append("%s: ref needs git" % where)
         checkout = _string(t, "checkout", where, errors)
@@ -233,6 +238,9 @@ def parse_manifest(text, path):
         if not name or not mname or "@" in mname:
             errors.append("%s: id must be plugin@marketplace" % where)
             continue
+        if not NAME.match(name):
+            errors.append("%s: plugin name %r has characters a harness will not take"
+                          % (where, name))
         if pid in plugins:
             errors.append("%s: listed twice" % where)
         m = marketplaces.get(mname)
@@ -275,6 +283,8 @@ def parse_manifest(text, path):
         spath = _string(t, "path", where, errors)
         if (s.git is None) == (spath is None):
             errors.append("%s: give exactly one of git or path" % where)
+        if (s.git or "").startswith("-") or (s.ref or "").startswith("-"):
+            errors.append("%s: git and ref may not begin with -" % where)
         if s.git and not GIT_SOURCE.match(s.git):
             errors.append("%s: git %r is not owner/repo or an https/ssh Git URL" % (where, s.git))
         if spath:
@@ -407,6 +417,11 @@ GIT_TIMEOUT = 120
 # Claude home and opens an outbound connection. Set on the two list calls only (spec §4).
 CLAUDE_LIST_ENV = {"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"}
 
+# Variables that would make git act on another repository than the one named (spec §10).
+GIT_ENV = ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY", "GIT_COMMON_DIR",
+           "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_NAMESPACE", "GIT_CEILING_DIRECTORIES",
+           "GIT_DISCOVERY_ACROSS_FILESYSTEM")
+
 _CREDENTIALS = re.compile(r"([A-Za-z][A-Za-z0-9+.-]*://)[^/\s@]+@")
 
 
@@ -470,9 +485,9 @@ class Runner:
 
     def run(self, argv, timeout=HARNESS_TIMEOUT, extra_env=None, cwd=None):
         env = None
-        if extra_env:
-            env = dict(os.environ)
-            env.update(extra_env)
+        if extra_env or argv[0] == "git":
+            env = {k: v for k, v in os.environ.items() if argv[0] != "git" or k not in GIT_ENV}
+            env.update(extra_env or {})
         started = datetime.datetime.now()
         r = Result(argv=list(argv), timeout=timeout)
         try:
@@ -494,18 +509,48 @@ class Runner:
         return r
 
     def write_log(self, path):
-        os.makedirs(os.path.dirname(path), exist_ok=True)
         atomic_write(path, "\n".join(self.entries) + ("\n" if self.entries else ""))
 
 
+def ensure_dir(path):
+    """Make path a real directory, refusing a symlink at it or at any parent below its base
+    ($HOME, or the XDG directory it lies in outside $HOME): a link is a refusal, never a
+    redirect (spec §10). Raises TreeError."""
+    bases = [home()] + [xdg(v, d) for v, d in (("XDG_STATE_HOME", ".local/state"),
+                                               ("XDG_CACHE_HOME", ".cache"),
+                                               ("XDG_CONFIG_HOME", ".config"))]
+    base = next((b for b in bases if path == b or path.startswith(b.rstrip("/") + "/")), None)
+    if base is None:
+        raise TreeError("%s is outside $HOME and the XDG directories" % path)
+    current = base
+    for part in [p for p in os.path.relpath(path, base).split(os.sep) if p != "."]:
+        current = os.path.join(current, part)
+        if os.path.islink(current):
+            raise TreeError("%s is a symlink; agent-sync writes nothing through it"
+                            % tilde(current))
+        if not os.path.isdir(current):
+            try:
+                os.mkdir(current)
+            except OSError as e:
+                raise TreeError("cannot create %s: %s" % (tilde(current), e))
+    return path
+
+
 def atomic_write(path, text):
-    """Write a temp file in the same directory, then rename it into place."""
-    tmp = "%s.tmp.%d" % (path, os.getpid())
-    with open(tmp, "w") as f:
-        f.write(text)
-        f.flush()
-        os.fsync(f.fileno())
-    os.replace(tmp, path)
+    """Write an exclusively created temp file in the same directory, then rename it into place."""
+    ensure_dir(os.path.dirname(path))
+    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path), prefix=os.path.basename(path) + ".")
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())
+        os.chmod(tmp, 0o644)
+        os.replace(tmp, path)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp)
+        raise
 
 
 # ── State and the lock ────────────────────────────────────────────────────────────────────────
@@ -528,8 +573,10 @@ class State:
             raise UsageError("cannot read the state file %s: %s; move it aside to start over"
                              % (tilde(path), e))
         if loaded is not None:
-            if not isinstance(loaded, dict) or loaded.get("version") != 1:
-                raise UsageError("state file %s is not version 1" % tilde(path))
+            problem = state_problem(loaded)
+            if problem:
+                raise UsageError("state file %s: %s; move it aside to start over"
+                                 % (tilde(path), problem))
             self.data.update(loaded)
         self._saved = self._text()
 
@@ -540,10 +587,41 @@ class State:
         text = self._text()
         if text == self._saved:
             return False
-        os.makedirs(os.path.dirname(self.path), exist_ok=True)
         atomic_write(self.path, text)
         self._saved = text
         return True
+
+
+STAMP = re.compile(r"^\d{4}-\d\d-\d\dT\d\d-\d\d-\d\d$")
+
+
+def state_problem(d):
+    """Why a loaded state file cannot be trusted, or None. Every name must be one path
+    component, because paths are rebuilt from names, never read from the file (spec §10)."""
+    if not isinstance(d, dict) or d.get("version") != 1:
+        return "not version 1"
+    if set(d) - {"version", "agy", "applied", "cleanup"}:
+        return "unknown keys %s" % ", ".join(sorted(set(d) - {"version", "agy", "applied",
+                                                               "cleanup"}))
+    agy, applied, cleanup = d.get("agy", {}), d.get("applied", {}), d.get("cleanup", {})
+    if not isinstance(agy, dict) or not all(
+            NAME.match(k) and isinstance(v, dict) and isinstance(v.get("digest"), str)
+            for k, v in agy.items()):
+        return "agy holds a name that is not a folder name, or a record without a digest"
+    if not isinstance(applied, dict) or not all(
+            h in HARNESSES and isinstance(v, dict) and all(isinstance(r, dict) for r in
+                                                           v.values())
+            for h, v in applied.items()):
+        return "applied is not {harness: {marketplace: record}}"
+    if not isinstance(cleanup, dict) or not all(
+            STAMP.match(ts) and isinstance(recs, list) and all(
+                isinstance(r, dict) and r.get("harness") in ("claude", "codex") and
+                NAME.match(str(r.get("name", ""))) and
+                re.match(r"^%s(\.\d+)?$" % re.escape(str(r.get("name"))), str(r.get("slot")))
+                for r in recs)
+            for ts, recs in cleanup.items()):
+        return "cleanup holds a run that is not {timestamp: [{harness, name, slot}]}"
+    return None
 
 
 class Lock:
@@ -554,8 +632,12 @@ class Lock:
         self.f = None
 
     def __enter__(self):
-        os.makedirs(os.path.dirname(self.path), exist_ok=True)
-        self.f = open(self.path, "a+")
+        try:
+            ensure_dir(os.path.dirname(self.path))
+            fd = os.open(self.path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o644)
+        except (TreeError, OSError) as e:
+            raise PrereqError("cannot open the lock %s: %s" % (tilde(self.path), e))
+        self.f = os.fdopen(fd, "r+")
         try:
             fcntl.flock(self.f, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except OSError:
@@ -631,30 +713,27 @@ def tree_files(root):
     return out
 
 
-class _Deferred:
-    pending = False
+_critical = {"depth": 0, "pending": False}
 
 
 @contextlib.contextmanager
 def critical():
-    """Defer SIGINT until the block ends, so a swap finishes or rolls back first (spec §10)."""
-    import threading
-    if threading.current_thread() is not threading.main_thread():
-        yield
-        return
-    flag = _Deferred()
-    previous = signal.getsignal(signal.SIGINT)
-
-    def handler(signum, frame):
-        flag.pending = True
-
-    signal.signal(signal.SIGINT, handler)
+    """Defer SIGINT until the outermost block ends, so a swap and its state record finish, or
+    roll back, together (spec §6, §10). Nested blocks join the outer one."""
+    outer = _critical["depth"] == 0 and threading.current_thread() is threading.main_thread()
+    if outer:
+        previous = signal.getsignal(signal.SIGINT)
+        signal.signal(signal.SIGINT, lambda *_: _critical.update(pending=True))
+    _critical["depth"] += 1
     try:
         yield
     finally:
-        signal.signal(signal.SIGINT, previous)
-        if flag.pending:
-            raise KeyboardInterrupt
+        _critical["depth"] -= 1
+        if outer:
+            signal.signal(signal.SIGINT, previous)
+            if _critical["pending"]:
+                _critical["pending"] = False
+                raise KeyboardInterrupt
 
 
 def unique(path):
@@ -673,17 +752,18 @@ def remove_if_empty(path):
 def install_tree(src, dest, stage_root, archive_dest, old_root):
     """Copy src to dest through a staged, verified copy and two renames (spec §6 steps 4-6).
 
-    Returns {"digest", "files", "archived"}; raises TreeError, after rolling back, if the copy
-    cannot be put in place, naming every path that holds something."""
+    Returns {"digest", "files", "archived", "note"}; raises TreeError, after rolling back, if
+    the copy cannot be put in place, naming every path that holds something. Every directory
+    written through is checked for symlinks first."""
     name = os.path.basename(dest)
     try:
         digest, files = digest_tree(src)
     except SymlinkError as e:
         raise TreeError(str(e))
-    stage = os.path.join(stage_root, "%s.%d" % (name, os.getpid()))
+    stage = os.path.join(ensure_dir(stage_root), "%s.%d" % (name, os.getpid()))
+    ensure_dir(os.path.dirname(dest))
     if os.path.lexists(stage):
         shutil.rmtree(stage)
-    os.makedirs(stage_root, exist_ok=True)
     try:
         shutil.copytree(src, stage, ignore=lambda d, names: [n for n in names
                                                              if n.startswith(".")])
@@ -693,12 +773,12 @@ def install_tree(src, dest, stage_root, archive_dest, old_root):
         shutil.rmtree(stage, ignore_errors=True)
         remove_if_empty(stage_root)
         raise TreeError(str(e))
-    archived = None
+    archived, note = None, ""
     with critical():
         moved = None
         if os.path.lexists(dest):
             archive_dest = unique(archive_dest)
-            os.makedirs(os.path.dirname(archive_dest), exist_ok=True)
+            ensure_dir(os.path.dirname(archive_dest))
             try:
                 _rename(dest, archive_dest)
                 moved = archive_dest
@@ -706,10 +786,8 @@ def install_tree(src, dest, stage_root, archive_dest, old_root):
                 if e.errno != errno.EXDEV:
                     shutil.rmtree(stage, ignore_errors=True)
                     raise TreeError("cannot move %s aside: %s" % (tilde(dest), e))
-                os.makedirs(old_root, exist_ok=True)
-                moved = os.path.join(old_root, "%s.%d" % (name, os.getpid()))
+                moved = os.path.join(ensure_dir(old_root), "%s.%d" % (name, os.getpid()))
                 _rename(dest, moved)
-        os.makedirs(os.path.dirname(dest), exist_ok=True)
         try:
             _rename(stage, dest)
         except OSError as e:
@@ -725,25 +803,43 @@ def install_tree(src, dest, stage_root, archive_dest, old_root):
             shutil.rmtree(stage, ignore_errors=True)
             raise TreeError("cannot put the new copy in place (%s); the previous copy is "
                             "restored" % e)
+        archived = moved if moved == archive_dest else None
         if moved is not None and moved != archive_dest:
-            shutil.move(moved, archive_dest)
-            remove_if_empty(old_root)
-        archived = archive_dest if moved is not None else None
+            try:
+                transfer(moved, archive_dest)
+                archived = archive_dest
+                remove_if_empty(old_root)
+            except (OSError, TreeError) as e:
+                note = "; the previous copy could not reach the archive (%s) and is at %s" \
+                    % (e, tilde(moved))
     remove_if_empty(stage_root)
-    return {"digest": digest, "files": files, "archived": archived}
+    return {"digest": digest, "files": files, "archived": archived, "note": note}
+
+
+def transfer(src, dst):
+    """Move a tree to another filesystem without recreating a symlink there (Rule #1)."""
+    for d, dirs, names in os.walk(src):
+        if any(os.path.islink(os.path.join(d, n)) for n in dirs + names):
+            raise TreeError("%s holds a symlink, which a copy would recreate" % tilde(src))
+    try:
+        shutil.copytree(src, dst)
+    except OSError:
+        shutil.rmtree(dst, ignore_errors=True)
+        raise
+    shutil.rmtree(src)
 
 
 def archive_tree(path, archive_dest):
-    """Move a folder into the archive (rename; copy and remove across filesystems)."""
+    """Move a folder into the archive, or back (rename; a checked copy across filesystems)."""
     archive_dest = unique(archive_dest)
-    os.makedirs(os.path.dirname(archive_dest), exist_ok=True)
+    ensure_dir(os.path.dirname(archive_dest))
     with critical():
         try:
             _rename(path, archive_dest)
         except OSError as e:
             if e.errno != errno.EXDEV:
                 raise
-            shutil.move(path, archive_dest)
+            transfer(path, archive_dest)
     return archive_dest
 
 
@@ -983,7 +1079,7 @@ def print_report(ctx, interrupted=False):
 
 
 def prepare(args):
-    """Manifest, paths and context, or UsageError."""
+    """The manifest and paths, validated, or UsageError. Nothing is read from the state yet."""
     path = args.manifest or default_manifest_path()
     manifest = load_manifest(os.path.abspath(os.path.expanduser(path)))
     run_harnesses = getattr(args, "only", None) or manifest.harnesses
@@ -991,49 +1087,50 @@ def prepare(args):
     for pid, _ in getattr(args, "accept_command", []) or []:
         if pid not in manifest.plugins and pid.partition("@")[2] not in manifest.marketplaces:
             raise UsageError("--accept-command names %s, which the manifest does not manage" % pid)
-    return Context(args, manifest, Paths())
+    if args.command == "sync":
+        check_prerequisites(manifest, run_harnesses)
+    return manifest, Paths()
 
 
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
     args = parse_args(argv)
     try:
-        ctx = prepare(args)
-        if args.command == "cleanup":
-            return run_cleanup(ctx)
-        check_prerequisites(ctx)
+        manifest, paths = prepare(args)
+        # The lock comes first: the state is read, and cleanup's candidates computed, only
+        # while this run holds it (spec §10).
+        with (contextlib.nullcontext() if args.dry_run else Lock(paths.lock)):
+            ctx = Context(args, manifest, paths)
+            interrupted = False
+            try:
+                if args.command == "cleanup":
+                    return run_cleanup(ctx)
+                run_sync(ctx)
+            except KeyboardInterrupt:
+                interrupted = True
+            finally:
+                ctx.save_state()
+                if not args.dry_run:
+                    with contextlib.suppress(OSError, TreeError):
+                        ctx.runner.write_log(paths.log)
+            return EXIT_INTERRUPTED if args.command == "cleanup" else \
+                print_report(ctx, interrupted)
     except UsageError as e:
         sys.stderr.write("agent-sync: %s\n" % e)
         return EXIT_USAGE
     except PrereqError as e:
         sys.stderr.write("agent-sync: %s\n" % e)
         return EXIT_PREREQ
-    interrupted = False
-    try:
-        with (contextlib.nullcontext() if ctx.dry_run else Lock(ctx.paths.lock)):
-            try:
-                run_sync(ctx)
-            except KeyboardInterrupt:
-                interrupted = True
-            finally:
-                ctx.save_state()
-                if not ctx.dry_run:
-                    ctx.runner.write_log(ctx.paths.log)
-    except PrereqError as e:
-        sys.stderr.write("agent-sync: %s\n" % e)
-        return EXIT_PREREQ
-    return print_report(ctx, interrupted)
 
 
-def check_prerequisites(ctx):
+def check_prerequisites(manifest, harnesses):
     """Exit 4 before anything runs when a Git source needs git and there is none."""
     needs_git = []
-    for m in ctx.manifest.marketplaces.values():
-        if any(m.source[h] == "git" for h in ctx.manifest.harnesses_using(m)
-               if h in ctx.harnesses):
+    for m in manifest.marketplaces.values():
+        if any(m.source[h] == "git" for h in manifest.harnesses_using(m) if h in harnesses):
             needs_git.append("marketplace %s" % m.name)
-    if "agy" in ctx.harnesses:
-        needs_git += ["skill %s" % s.name for s in ctx.manifest.skills if s.git]
+    if "agy" in harnesses:
+        needs_git += ["skill %s" % s.name for s in manifest.skills if s.git]
     if needs_git and shutil.which("git") is None:
         raise PrereqError("git is not on PATH, and %s needs it" % ", ".join(needs_git))
 
@@ -1097,28 +1194,42 @@ def checkout_source(ctx, path):
 
 
 def git_source(ctx, key, url, ref):
-    """agent-sync's own clone of a Git source, moved to `ref` (never a harness's cache)."""
+    """agent-sync's own clone of a Git source, moved to `ref` (never a harness's cache). Every
+    command names the repository and worktree explicitly, and links are checked out as plain
+    files (core.symlinks=false), so no tracked symlink lands in $HOME (spec §6)."""
     if key in ctx.sources:
         return ctx.sources[key]
     d = os.path.join(ctx.paths.sources, key)
-    run = lambda *a: ctx.runner.run(["git", "-C", d] + list(a), GIT_TIMEOUT)  # noqa: E731
-    before = None
-    if os.path.isdir(os.path.join(d, ".git")):
-        r = run("rev-parse", "HEAD")
-        before = r.stdout.strip() if r.ok else None
-    src = Source("git", before=before)
+    git = ["git", "--git-dir", os.path.join(d, ".git"), "--work-tree", d,
+           "-c", "core.symlinks=false"]
+    run = lambda *a: ctx.runner.run(git + list(a), GIT_TIMEOUT)  # noqa: E731
+    src = Source("git")
     ctx.sources[key] = src
+    meta = os.path.join(d, ".git")
+    if os.path.islink(d) or os.path.lexists(meta) and (os.path.islink(meta) or
+                                                       not os.path.isdir(meta)):
+        src.error = "%s is a symlink or holds redirected Git metadata; delete it to " \
+                    "start over" % tilde(d)
+        return src
+    if os.path.isdir(meta):
+        r = run("rev-parse", "HEAD")
+        src.before = r.stdout.strip() if r.ok else None
     if not ctx.fetch:
-        src.tree, src.revision = (d, before) if before else (None, None)
-        src.unchecked = before is None
+        src.tree, src.revision = (d, src.before) if src.before else (None, None)
+        src.unchecked = src.before is None
+        return src
+    try:
+        ensure_dir(ctx.paths.sources)
+    except TreeError as e:
+        src.error = str(e)
         return src
     if os.path.isdir(d):
         origin = run("remote", "get-url", "origin")
         if not origin.ok or origin.stdout.strip() != url:
             shutil.rmtree(d)
     if not os.path.isdir(d):
-        os.makedirs(os.path.dirname(d), exist_ok=True)
-        r = ctx.runner.run(["git", "clone", "--no-checkout", url, d], GIT_TIMEOUT)
+        r = ctx.runner.run(["git", "-c", "core.symlinks=false", "clone", "--no-checkout", "--",
+                            url, d], GIT_TIMEOUT)
         if not r.ok:
             src.error = "cannot clone %s: %s" % (redact(url), r.error())
             return src
@@ -1162,9 +1273,17 @@ class Catalog:
                 doc = json.load(f)
             self.name = doc["name"]
             self.root = (doc.get("metadata") or {}).get("pluginRoot") or ""
-            self.entries = {e["name"]: e for e in doc.get("plugins", [])}
-        except (OSError, ValueError, KeyError, TypeError) as e:
+            plugins = doc.get("plugins", [])
+            if not (isinstance(self.name, str) and isinstance(self.root, str) and
+                    isinstance(plugins, list) and all(isinstance(e, dict) and
+                                                      isinstance(e.get("name"), str)
+                                                      for e in plugins)):
+                raise TypeError("unexpected types in name, metadata.pluginRoot or plugins")
+        except (OSError, ValueError, KeyError, TypeError, AttributeError) as e:
             raise CatalogError("cannot read %s: %s" % (tilde(path), e))
+        # A name that could be read as an option never reaches a CLI (spec §4).
+        self.entries = {e["name"]: e for e in plugins if NAME.match(e["name"])}
+        self.bad = sorted(e["name"] for e in plugins if not NAME.match(e["name"]))
 
     def plugin_dir(self, name):
         src = self.entries[name].get("source")
@@ -1175,10 +1294,9 @@ class Catalog:
         return self.inside(src)
 
     def inside(self, rel, base=None):
-        p = os.path.normpath(os.path.join(base or self.tree, rel))
-        if p != self.tree and not p.startswith(self.tree.rstrip("/") + "/"):
-            raise CatalogError("%s points outside the catalog" % rel)
-        return p
+        if not isinstance(rel, str):
+            raise CatalogError("a path in the catalog is not a string: %r" % (rel,))
+        return contained(self.tree, os.path.join(base or self.tree, rel))
 
     def skills(self, name):
         """The plugin's skills: the declared `skills` paths (catalog entry, else plugin.json),
@@ -1195,6 +1313,8 @@ class Catalog:
             except (OSError, ValueError, AttributeError):
                 declared = None
         found = []
+        if declared is not None and not isinstance(declared, (str, list)):
+            raise CatalogError("its skills field is neither a path nor a list of paths")
         if declared is None:
             base = os.path.join(pdir, "skills")
             dirs = [os.path.join(base, n) for n in sorted(os.listdir(base))] \
@@ -1211,8 +1331,24 @@ class Catalog:
                     raise CatalogError("declared skills path %s does not exist" % rel)
         for d in dirs:
             if os.path.isfile(os.path.join(d, "SKILL.md")):
+                self.inside(os.path.relpath(d, self.tree))
                 found.append(Skill(os.path.basename(d), d, pid, front_matter_error(d)))
         return found
+
+
+def contained(root, path):
+    """path, normalised, if it lies inside root with no symlink between root and it, so no
+    link can bring in a tree from elsewhere (spec §6). Raises CatalogError."""
+    p = os.path.normpath(path)
+    if p != root and not p.startswith(root.rstrip("/") + "/"):
+        raise CatalogError("%s points outside %s" % (path, tilde(root)))
+    current = root
+    for part in [x for x in os.path.relpath(p, root).split(os.sep) if x != "."]:
+        current = os.path.join(current, part)
+        if os.path.islink(current):
+            raise CatalogError("%s is a symlink; nothing is read through it"
+                               % os.path.relpath(current, root))
+    return p
 
 
 def front_matter_error(skill_dir):
@@ -1263,6 +1399,8 @@ def enrol(ctx, m, harness, cat):
             failed.append((r.id, "the catalog at %s has no plugin %s" % (
                 (cat_label(ctx, m, harness)), r.name)))
     if m.plugins == "all":
+        failed += [("%r@%s" % (n, m.name), "a catalog plugin name a harness will not take; "
+                    "not passed to any CLI") for n in cat.bad]
         by_name = {r.name: r for r in rows}
         for name in cat.entries:
             row = by_name.get(name)
@@ -1318,6 +1456,7 @@ def harness_present(ctx, harness):
 
 
 def planned(ctx, harness, item, argv, why=""):
+    argv = [redact(a) for a in argv]
     ctx.report.add(harness, item, "unchecked", "%swould run: %s" % (why, " ".join(argv)),
                    argv=argv)
 
@@ -1407,22 +1546,18 @@ def claude_marketplace(ctx, m, src, observed, state):
         matches = kind in ("git", "github", "url") and have and \
             normalize_git(have) == normalize_git(m.git)
         want = git_url(m.git)
-    if kind not in ("directory", "git", "github", "url") or not have:
-        ctx.report.add(h, item, "unverifiable", "Claude lists it with a source shape agent-sync "
-                                                "does not recognise; not compared")
-    elif not matches:
-        ctx.report.add(h, item, "source-mismatch",
-                       "Claude has %s, the manifest says %s; to change it by hand:\n"
-                       "claude plugin marketplace remove %s\n%s"
-                       % (redact(have), redact(want), m.name, " ".join(add)))
-        return False
-    elif m.source[h] == "git" and (observed.get("ref") or None) != m.ref:
-        ctx.report.add(h, item, "ref-mismatch",
-                       "Claude follows %s, the manifest says %s; to change it by hand:\n"
-                       "claude plugin marketplace remove %s\n%s"
-                       % (observed.get("ref") or "the default branch",
-                          m.ref or "the default branch", m.name, " ".join(add)))
-        return False
+    if kind not in ("directory", "git", "github", "url") or not isinstance(have, str) or \
+            not isinstance(observed.get("ref"), (str, type(None))):
+        return unverifiable(ctx, h, item, "Claude lists it with a source shape agent-sync does "
+                                          "not recognise")
+    if not matches:
+        return mismatch(ctx, h, item, "source", "Claude has %s, the manifest says %s"
+                        % (have, want), ["claude plugin marketplace remove " + m.name, add])
+    if m.source[h] == "git" and (observed.get("ref") or None) != m.ref:
+        return mismatch(ctx, h, item, "ref", "Claude follows %s, the manifest says %s"
+                        % (observed.get("ref") or "the default branch",
+                           m.ref or "the default branch"),
+                        ["claude plugin marketplace remove " + m.name, add])
     if m.source[h] == "checkout":
         digest = checkout_digest(m.checkout)
         last = (state.get(m.name) or {}).get("digest")
@@ -1431,26 +1566,56 @@ def claude_marketplace(ctx, m, src, observed, state):
             src.label(), "unchanged" if last == digest else "changed" if last else "recorded"))
         return True
     update = ["claude", "plugin", "marketplace", "update", "--json", m.name]
-    last = (state.get(m.name) or {}).get("revision") or src.before
+    return git_refresh(ctx, h, m, src, state, update, lambda r: (
+        r.ok and (json_last_line(r.stdout) or {}).get("outcome") in (None, "ok"), r.error()),
+        " (catalog refreshed)")
+
+
+def unverifiable(ctx, h, item, why):
+    """Source metadata that cannot be compared: nothing is changed on a guess (spec §5)."""
+    ctx.report.add(h, item, "unverifiable", why + "; not compared, and its plugins are left as "
+                                                  "they are")
+    return False
+
+
+def mismatch(ctx, h, item, what, detail, commands):
+    ctx.report.add(h, item, what + "-mismatch", redact(
+        "%s; to change it by hand:\n%s" % (detail, "\n".join(
+            c if isinstance(c, str) else " ".join(c) for c in commands))))
+    return False
+
+
+def git_refresh(ctx, h, m, src, state, argv, judge, unmoved=""):
+    """Refresh a Git marketplace through its harness. The baseline is the revision agent-sync
+    last applied, never its own cache, which a --check moves (spec §8)."""
+    item = "marketplace %s" % m.name
+    last = (state.get(m.name) or {}).get("revision")
     if ctx.dry_run:
-        planned(ctx, h, item, update, "remote not fetched; ")
+        planned(ctx, h, item, argv, "remote not fetched; ")
         return True
     if ctx.check:
-        if last == src.revision:
+        if last is None:
+            ctx.report.add(h, item, "unverifiable", "%s; no applied revision recorded, so "
+                           "whether %s holds it is unknown; a run records one"
+                           % (revision_detail(m, None, src.revision), HARNESS_NAMES[h]))
+        elif last == src.revision:
             ctx.report.add(h, item, "unchanged", revision_detail(m, None, src.revision))
         else:
-            planned(ctx, h, item, update, revision_detail(m, last, src.revision) + "; ")
+            planned(ctx, h, item, argv, revision_detail(m, last, src.revision) + "; ")
         return True
-    r = ctx.runner.run(update)
-    doc = json_last_line(r.stdout)
-    if not r.ok or (doc and doc.get("outcome") not in (None, "ok")):
-        ctx.report.add(h, item, "failed", r.error())
+    r = ctx.runner.run(argv)
+    ok, error = judge(r)
+    if not ok:
+        ctx.report.add(h, item, "failed", error)
         return False
     state[m.name] = {"revision": src.revision}
-    moved = last and last != src.revision
-    ctx.report.add(h, item, "updated" if moved else "unchanged",
-                   revision_detail(m, last, src.revision) +
-                   ("" if moved else " (catalog refreshed)"))
+    if last is None:
+        ctx.report.add(h, item, "updated", revision_detail(m, None, src.revision) +
+                       " (first refresh recorded)")
+    elif last != src.revision:
+        ctx.report.add(h, item, "updated", revision_detail(m, last, src.revision))
+    else:
+        ctx.report.add(h, item, "unchanged", revision_detail(m, None, src.revision) + unmoved)
     return True
 
 
@@ -1476,14 +1641,16 @@ def claude_plugin(ctx, m, e, observed, git_moved):
     else:
         argv = ["claude", "plugin", "update", "--scope", "user", "--json"] + accept + [e.id]
     disabled = observed is not None and not observed.get("enabled", True)
+    # A plugin Claude reads from a checkout folder is live: edits need no run (C2, spec §5.1).
+    quiet = "live" if observed is not None and observed.get("readFromFolder") else "unchanged"
     if not ctx.apply:
         if argv:
             planned(ctx, h, e.id, argv)
         if disabled:
             planned(ctx, h, e.id, ["claude", "plugin", "enable", "--scope", "user", "--json",
                                    e.id])
-        return None if argv or disabled else ctx.report.add(h, e.id, "unchanged")
-    verb, detail = "unchanged", ""
+        return None if argv or disabled else ctx.report.add(h, e.id, quiet)
+    verb, detail = quiet, ""
     if argv:
         r = ctx.runner.run(argv)
         doc = json_last_line(r.stdout)
@@ -1502,7 +1669,7 @@ def claude_plugin(ctx, m, e, observed, git_moved):
     if disabled:
         if not claude_enable(ctx, e.id):
             return None
-        if verb == "unchanged":
+        if verb in ("unchanged", "live"):
             verb = "enabled"
     return ctx.report.add(h, e.id, verb, detail)
 
@@ -1516,9 +1683,25 @@ def claude_enable(ctx, pid):
     return False
 
 
+ITEM_ERRORS = (CatalogError, TreeError, SymlinkError, OSError, ValueError, TypeError, KeyError,
+               AttributeError)
+
+
+def harness_home(ctx, h):
+    """In a dry run or --check, a harness whose home does not exist yet is not called: its
+    first command would initialise that home (C1, spec §8). Returns False after the row."""
+    path = {"claude": ctx.paths.claude_home, "codex": ctx.paths.codex_home,
+            "agy": ctx.paths.gemini_config}[h]
+    if ctx.apply or os.path.isdir(path):
+        return True
+    ctx.report.add(h, "%s CLI" % h, "unknown", "home not initialised (%s); not called, since "
+                   "its first command would create it" % tilde(path))
+    return False
+
+
 def sync_claude(ctx):
     h = "claude"
-    if h not in ctx.harnesses or not harness_present(ctx, h):
+    if h not in ctx.harnesses or not harness_present(ctx, h) or not harness_home(ctx, h):
         return
     markets = claude_list(ctx, "marketplaces")
     plugins = claude_list(ctx, "plugins") if markets is not None else None
@@ -1527,17 +1710,22 @@ def sync_claude(ctx):
     state = ctx.applied(h)
     managed, unknown, rows, work = set(), set(), [], []
     for m in marketplaces_for(ctx, h):      # marketplaces first, then their plugins (spec §10)
-        src, cat = resolve_marketplace(ctx, m, h)
-        if src is None or cat is None and m.plugins == "all":
+        try:
+            src, cat = resolve_marketplace(ctx, m, h)
+            if src is None or cat is None and m.plugins == "all":
+                unknown.add(m.name)
+                if src is not None:
+                    ctx.report.add(h, "marketplace %s" % m.name, "unchecked", "catalog not "
+                                   "fetched yet; its plugins are listed by --check or a run")
+                continue
+            enrolled, failed = enrol(ctx, m, h, cat)
+            before = (state.get(m.name) or {}).get("revision")
+            proceed = claude_marketplace(ctx, m, src, markets.get(m.name), state)
+            ctx.save_state()
+        except ITEM_ERRORS as e:
+            ctx.report.add(h, "marketplace %s" % m.name, "failed", str(e))
             unknown.add(m.name)
-            if src is not None:
-                ctx.report.add(h, "marketplace %s" % m.name, "unchecked", "catalog not fetched "
-                               "yet; its plugins are listed by --check or a run")
             continue
-        enrolled, failed = enrol(ctx, m, h, cat)
-        before = (state.get(m.name) or {}).get("revision") or src.before
-        proceed = claude_marketplace(ctx, m, src, markets.get(m.name), state)
-        ctx.save_state()
         managed.update(e.id for e in enrolled)
         work.append((m, cat, enrolled, failed, proceed, before != src.revision))
     for m, cat, enrolled, failed, proceed, moved in work:
@@ -1550,9 +1738,11 @@ def sync_claude(ctx):
             row = claude_plugin(ctx, m, e, plugins.get(e.id), moved)
             if row is not None:
                 rows.append(row)
-        record_selection(ctx, h, cat, enrolled, plugins)
     if any(r.result in CHANGED for r in rows) and ctx.apply:
         plugins = claude_list(ctx, "plugins") or {}
+    for m, cat, enrolled, _, proceed, _ in work:   # after the changes, so a new install counts
+        if proceed:
+            record_selection(ctx, h, m, cat, enrolled, plugins)
     for row in rows:
         p = plugins.get(row.item)
         if p is None or not p.get("enabled", True):
@@ -1566,8 +1756,9 @@ def sync_claude(ctx):
             ctx.report.add(h, pid, "unmanaged", "not in the manifest; left as it is")
 
 
-def record_selection(ctx, harness, cat, enrolled, installed):
-    """Remember the skills of enabled managed plugins, for the duplicate check (spec §7)."""
+def record_selection(ctx, harness, m, cat, enrolled, installed):
+    """Remember the skills of enabled managed plugins, with the tree the harness actually loads
+    (None when it cannot be found), for duplicates and cleanup (spec §7, §9)."""
     if cat is None:
         return
     sel = ctx.selected.setdefault(harness, {})
@@ -1575,9 +1766,18 @@ def record_selection(ctx, harness, cat, enrolled, installed):
         p = installed.get(e.id)
         if p is None or not p.get("enabled", True):
             continue
-        with contextlib.suppress(CatalogError, OSError, KeyError):
+        if harness == "claude":
+            root = p.get("readFromFolder") or p.get("installPath")
+        else:
+            root = os.path.join(ctx.paths.codex_home, "plugins", "cache", m.name, e.name,
+                                str(p.get("version")))
+        with contextlib.suppress(*ITEM_ERRORS):
+            pdir = cat.plugin_dir(e.name)
             for s in cat.skills(e.name):
-                sel.setdefault(s.name, (e.id, s.path, p.get("version")))
+                loaded = os.path.join(root, os.path.relpath(s.path, pdir)) \
+                    if isinstance(root, str) else None
+                sel.setdefault(s.name, (e.id, s.path, p.get("version"),
+                                        loaded if loaded and os.path.isdir(loaded) else None))
 
 
 # ── Codex (spec §5.2) ─────────────────────────────────────────────────────────────────────────
@@ -1631,71 +1831,69 @@ def codex_marketplace(ctx, m, src, observed, refs, state):
         return True
     source = observed.get("marketplaceSource") or {}
     kind, have = source.get("sourceType"), source.get("source")
+    if not isinstance(kind, str) or not isinstance(have, str) or not kind or not have:
+        return unverifiable(ctx, h, item, "Codex lists it with a source shape agent-sync does "
+                                          "not recognise")
     if use_git:
-        matches = kind == "git" and have and normalize_git(have) == normalize_git(m.git)
+        matches = kind == "git" and normalize_git(have) == normalize_git(m.git)
     else:
         matches = kind != "git" and (same_path(have, m.checkout) or
                                      same_path(observed.get("root"), m.checkout))
-    if not kind or not have:
-        ctx.report.add(h, item, "unverifiable", "Codex lists it with a source shape agent-sync "
-                                                "does not recognise; not compared")
-    elif not matches:
-        ctx.report.add(h, item, "source-mismatch",
-                       "Codex has %s, the manifest says %s; to change it by hand:\n"
-                       "codex plugin marketplace remove %s\n%s"
-                       % (redact(have), redact(add[-1]), m.name, " ".join(add)))
-        return False
-    if use_git and m.ref:
-        if refs is None or m.name not in refs:
-            ctx.report.add(h, item, "unverifiable", "its ref could not be read from %s; "
-                                                    "not compared"
-                           % tilde(os.path.join(ctx.paths.codex_home, "config.toml")))
-        elif refs[m.name] != m.ref:
-            ctx.report.add(h, item, "ref-mismatch",
-                           "Codex follows %s, the manifest says %s; to change it by hand "
-                           "(installed plugins come back by themselves):\n"
-                           "codex plugin marketplace remove %s\n%s"
-                           % (refs[m.name] or "the default branch", m.ref, m.name,
-                              " ".join(add)))
-            return False
+    fix = ["codex plugin marketplace remove " + m.name, add]
+    if not matches:
+        return mismatch(ctx, h, item, "source", "Codex has %s, the manifest says %s"
+                        % (have, add[-1]), fix)
+    if use_git:
+        # The ref is only in config.toml (C5), read and never written. Compared both ways, so
+        # a manifest that drops its ref still sees a pin Codex keeps.
+        have_ref = (refs or {}).get(m.name, ())
+        if have_ref == () or not isinstance(have_ref, (str, type(None))):
+            return unverifiable(ctx, h, item, "its ref could not be read from %s"
+                                % tilde(os.path.join(ctx.paths.codex_home, "config.toml")))
+        if (have_ref or None) != m.ref:
+            return mismatch(ctx, h, item, "ref", "Codex follows %s, the manifest says %s "
+                            "(installed plugins come back by themselves)"
+                            % (have_ref or "the default branch", m.ref or "the default branch"),
+                            fix)
     if not use_git:
         ctx.report.add(h, item, "unchanged", "checkout %s; Codex copies plugins at install, "
                                              "so edits show as stale below" % src.label())
         return True
     upgrade = ["codex", "plugin", "marketplace", "upgrade", "--json", m.name]
-    last = (state.get(m.name) or {}).get("revision") or src.before
-    if ctx.dry_run:
-        planned(ctx, h, item, upgrade, "remote not fetched; ")
-        return True
-    if ctx.check:
-        if last == src.revision:
-            ctx.report.add(h, item, "unchanged", revision_detail(m, None, src.revision))
-        else:
-            planned(ctx, h, item, upgrade, revision_detail(m, last, src.revision) + "; ")
-        return True
-    r = ctx.runner.run(upgrade)
-    doc = json_document(r.stdout) if r.ok else None
-    if not isinstance(doc, dict) or doc.get("errors"):
-        ctx.report.add(h, item, "failed", r.error() if not isinstance(doc, dict) else
-                       "; ".join(str(x) for x in doc["errors"]))
-        return False
-    state[m.name] = {"revision": src.revision}
-    moved = last and last != src.revision
-    ctx.report.add(h, item, "updated" if moved else "unchanged",
-                   revision_detail(m, last, src.revision))
-    return True
+
+    def judge(r):
+        doc = json_document(r.stdout) if r.ok else None
+        if not isinstance(doc, dict):
+            return False, r.error()
+        return not doc.get("errors"), "; ".join(str(x) for x in doc.get("errors") or [])
+    return git_refresh(ctx, h, m, src, state, upgrade, judge)
+
+
+def skill_dirs(root):
+    """Relative paths of the folders holding SKILL.md under root, dot names skipped."""
+    out = set()
+    for d, dirs, names in os.walk(root):
+        dirs[:] = [n for n in dirs if not n.startswith(".")]
+        if "SKILL.md" in names:
+            out.add(os.path.relpath(d, root))
+    return out
 
 
 def codex_cache_check(ctx, m, cat, name, version):
-    """'match', 'stale' or 'unverifiable' for one installed plugin's skill trees (spec §5.2)."""
+    """'match', 'stale' or 'unverifiable' for one installed plugin: the same skills, by name,
+    and the same bytes in each, in the cache and in the source (spec §5.2)."""
     cache = os.path.join(ctx.paths.codex_home, "plugins", "cache", m.name, name, str(version))
     if not version or not os.path.isdir(cache):
         return "unverifiable"
     try:
         pdir = cat.plugin_dir(name)
-        for s in cat.skills(name):
-            mine = os.path.join(cache, os.path.relpath(s.path, pdir))
-            if not os.path.isdir(mine) or digest_tree(mine)[0] != digest_tree(s.path)[0]:
+        cat.skills(name)            # the source's skills must be readable, links refused
+        mine, theirs = skill_dirs(cache), skill_dirs(pdir)
+        if mine != theirs:
+            return "stale"          # a skill removed or renamed upstream is still in the cache
+        for rel in theirs:
+            if digest_tree(os.path.join(cache, rel))[0] != digest_tree(os.path.join(pdir,
+                                                                                    rel))[0]:
                 return "stale"
     except (CatalogError, SymlinkError, OSError, TypeError):
         return "unverifiable"
@@ -1703,6 +1901,8 @@ def codex_cache_check(ctx, m, cat, name, version):
 
 
 def codex_plugin(ctx, m, src, cat, e, observed):
+    """Install, check or repair one plugin. A change is verified later, against the list taken
+    after it (codex_verify)."""
     h = "codex"
     add = ["codex", "plugin", "add", "--json", e.id]
     at = "checkout %s" % src.label() if src.kind == "checkout" else src.label()
@@ -1710,15 +1910,13 @@ def codex_plugin(ctx, m, src, cat, e, observed):
         if not ctx.apply:
             return planned(ctx, h, e.id, add)
         r = ctx.runner.run(add)
-        doc = json_document(r.stdout) if r.ok else None
-        if not isinstance(doc, dict):
+        if not r.ok or not isinstance(json_document(r.stdout), dict):
             return ctx.report.add(h, e.id, "failed", r.error())
-        observed = {"version": doc.get("version")}
-        verdict = codex_cache_check(ctx, m, cat, e.name, observed["version"]) if cat else None
-        detail = "%s%s" % (observed["version"], ", cache digest matches %s" % at
-                           if verdict == "match" else "")
-        return ctx.report.add(h, e.id, "installed", detail)
+        return ctx.report.add(h, e.id, "installed", "", at=at)
     version = observed.get("version")
+    if observed.get("enabled") is False:
+        return ctx.report.add(h, e.id, "failed", "%s, installed but disabled in Codex; enable it "
+                                                 "there (agent-sync has no verb for it)" % version)
     if cat is None:
         return ctx.report.add(h, e.id, "unchecked", "%s; catalog not fetched, cache not "
                                                     "compared" % version)
@@ -1738,15 +1936,35 @@ def codex_plugin(ctx, m, src, cat, e, observed):
     if not r.ok:
         return ctx.report.add(h, e.id, "failed", "repair failed, cache left as it was: "
                               + r.error())
-    if codex_cache_check(ctx, m, cat, e.name, version) == "match":
-        return ctx.report.add(h, e.id, "updated", "%s, repaired: cache now matches %s"
-                              % (version, at))
-    return ctx.report.add(h, e.id, "stale", stale + "; still differs after --repair")
+    return ctx.report.add(h, e.id, "updated", "repaired", at=at, stale=stale)
+
+
+def codex_verify(ctx, m, cat, row, p):
+    """Settle an installed or repaired row from the list taken after the change."""
+    at = row.extra.pop("at")
+    stale = row.extra.pop("stale", None)
+    if p is None:
+        row.result, row.detail = "failed", "Codex reported success, but does not list it"
+        return
+    version = p.get("version")
+    verdict = codex_cache_check(ctx, m, cat, row.item.partition("@")[0], version) \
+        if cat else "unverifiable"
+    if p.get("enabled") is False:
+        row.result, row.detail = "failed", "%s, installed but disabled in Codex" % version
+    elif verdict == "match":
+        row.detail = "%s, %scache digest matches %s" % (version, "repaired: " if stale else "",
+                                                       at)
+    elif stale or verdict == "stale":
+        row.result = "stale"
+        row.detail = (stale or "cache differs from %s right after install" % at) + \
+            ("; still differs after --repair" if stale else "")
+    else:
+        row.detail = "%s; cache layout not recognised, not compared" % version
 
 
 def sync_codex(ctx):
     h = "codex"
-    if h not in ctx.harnesses or not harness_present(ctx, h):
+    if h not in ctx.harnesses or not harness_present(ctx, h) or not harness_home(ctx, h):
         return
     r = ctx.runner.run(["codex", "plugin", "marketplace", "list", "--json"])
     doc = json_document(r.stdout) if r.ok else None
@@ -1759,16 +1977,20 @@ def sync_codex(ctx):
     state = ctx.applied(h)
     work = []
     for m in marketplaces_for(ctx, h):      # marketplaces first, then their plugins (spec §10)
-        src, cat = resolve_marketplace(ctx, m, h)
-        if src is None:
+        try:
+            src, cat = resolve_marketplace(ctx, m, h)
+            if src is None:
+                continue
+            if cat is None and m.plugins == "all":
+                ctx.report.add(h, "marketplace %s" % m.name, "unchecked", "catalog not fetched "
+                               "yet; its plugins are listed by --check or a run")
+                continue
+            enrolled, failed = enrol(ctx, m, h, cat)
+            proceed = codex_marketplace(ctx, m, src, markets.get(m.name), refs, state)
+            ctx.save_state()
+        except ITEM_ERRORS as e:
+            ctx.report.add(h, "marketplace %s" % m.name, "failed", str(e))
             continue
-        if cat is None and m.plugins == "all":
-            ctx.report.add(h, "marketplace %s" % m.name, "unchecked",
-                           "catalog not fetched yet; its plugins are listed by --check or a run")
-            continue
-        enrolled, failed = enrol(ctx, m, h, cat)
-        proceed = codex_marketplace(ctx, m, src, markets.get(m.name), refs, state)
-        ctx.save_state()
         work.append((m, src, cat, enrolled, failed, proceed))
     for m, src, cat, enrolled, failed, proceed in work:
         for pid, why in failed:
@@ -1781,11 +2003,18 @@ def sync_codex(ctx):
         if installed is None:
             skip_plugins(ctx, h, enrolled, "its plugins could not be listed")
             continue
+        rows = []
         for e in enrolled:
-            codex_plugin(ctx, m, src, cat, e, installed.get(e.id))
-        if ctx.apply and any(r.result in CHANGED and r.harness == h for r in ctx.report.rows):
-            installed = codex_plugins(ctx, m.name) or installed
-        record_selection(ctx, h, cat, enrolled, installed)
+            try:
+                rows.append(codex_plugin(ctx, m, src, cat, e, installed.get(e.id)))
+            except ITEM_ERRORS as err:
+                ctx.report.add(h, e.id, "failed", str(err))
+        changed = [row for row in rows if row is not None and "at" in row.extra]
+        if changed:
+            installed = codex_plugins(ctx, m.name) or {}
+            for row in changed:
+                codex_verify(ctx, m, cat, row, installed.get(row.item))
+        record_selection(ctx, h, m, cat, enrolled, installed)
         ids = {e.id for e in enrolled}
         for pid in installed:
             if pid not in ids:
@@ -1795,32 +2024,39 @@ def sync_codex(ctx):
 # ── agy: skill copies (spec §5.3, §6) ─────────────────────────────────────────────────────────
 
 def agy_selection(ctx):
-    """Every skill the manifest selects for agy, with failures reported. -> [(Skill, label)]"""
-    h = "agy"
-    out = []
+    """Every skill the manifest selects for agy, with failures reported -> ([(Skill, label)],
+    unresolved): the sources, plugins and loose skills whose selection is not known this run,
+    whose owned copies prune must therefore leave alone (spec §6)."""
+    h, out, unresolved = "agy", [], set()
     for m in marketplaces_for(ctx, h):
-        src, cat = resolve_marketplace(ctx, m, h)
-        if src is None:
+        try:
+            src, cat = resolve_marketplace(ctx, m, h)
+            if src is not None and cat is None:
+                ctx.report.add(h, "marketplace %s" % m.name, "unchecked", "catalog not fetched "
+                               "yet; its skills are listed by --check or a run")
+            if cat is None:
+                unresolved.add("@" + m.name)
+                continue
+            enrolled, failed = enrol(ctx, m, h, cat)
+        except ITEM_ERRORS as err:
+            ctx.report.add(h, "marketplace %s" % m.name, "failed", str(err))
+            unresolved.add("@" + m.name)
             continue
-        if cat is None:
-            ctx.report.add(h, "marketplace %s" % m.name, "unchecked",
-                           "catalog not fetched yet; its skills are listed by --check or a run")
-            continue
-        enrolled, failed = enrol(ctx, m, h, cat)
         for pid, why in failed:
             ctx.report.add(h, pid, "failed", why)
+            unresolved.add(pid)
         for e in enrolled:
             try:
                 skills = cat.skills(e.name)
-            except (CatalogError, OSError) as err:
+                unknown = sorted(set(e.agy_skills or ()) - {s.name for s in skills})
+                if unknown:
+                    raise CatalogError("agy_skills names %s, not a skill of this plugin"
+                                       % ", ".join(unknown))
+            except ITEM_ERRORS as err:
                 ctx.report.add(h, e.id, "failed", str(err))
+                unresolved.add(e.id)
                 continue
             if e.agy_skills is not None:
-                unknown = sorted(set(e.agy_skills) - {s.name for s in skills})
-                if unknown:
-                    ctx.report.add(h, e.id, "failed", "agy_skills names %s, not a skill of this "
-                                                      "plugin" % ", ".join(unknown))
-                    continue
                 skills = [s for s in skills if s.name in e.agy_skills]
             out += [(s, src.label()) for s in skills]
     for s in ctx.manifest.skills:
@@ -1828,39 +2064,60 @@ def agy_selection(ctx):
             out.append((Skill(s.name, s.path, None, front_matter_error(s.path)), None))
             continue
         src = git_source(ctx, "skill-" + s.name, git_url(s.git), s.ref)
-        if src.error or src.tree is None:
-            ctx.report.add(h, s.name, "failed" if src.error else "unchecked",
-                           src.error or "source not fetched yet")
-            continue
-        path = os.path.join(src.tree, s.subdir) if s.subdir else src.tree
-        if not os.path.isfile(os.path.join(path, "SKILL.md")):
-            ctx.report.add(h, s.name, "failed", "%s holds no SKILL.md" % (s.subdir or "the "
-                                                                                   "repository"))
+        path = os.path.join(src.tree, s.subdir) if src.tree and s.subdir else src.tree
+        why = src.error or (None if src.tree else "source not fetched yet")
+        if not why:
+            try:
+                contained(src.tree, path)
+            except CatalogError as err:
+                why = str(err)
+        if not why and not os.path.isfile(os.path.join(path, "SKILL.md")):
+            why = "%s holds no SKILL.md" % (s.subdir or "the repository")
+        if why:
+            ctx.report.add(h, s.name, "failed" if src.tree or src.error else "unchecked", why)
+            unresolved.add("skill " + s.name)
             continue
         out.append((Skill(s.name, path, None, front_matter_error(path)), src.label()))
-    return out
+    return out, unresolved
 
 
 def agy_item(skill):
     return "%s/%s" % (skill.plugin.partition("@")[0], skill.name) if skill.plugin else skill.name
 
 
-def agy_reserved(ctx, plugins):
+def agy_reserved(ctx, plugins, fold):
     """Names agy already has: its bundled skills and every installed agy plugin's skills."""
     reserved = {}
     if os.path.isdir(ctx.paths.agy_builtin):
         for n in os.listdir(ctx.paths.agy_builtin):
-            reserved[n] = "a skill bundled with agy"
+            reserved[fold(n)] = "a skill bundled with agy"
     for p in plugins:
         for n in p.get("skills") or []:
-            reserved.setdefault(n, "agy plugin %s" % p.get("name"))
+            reserved.setdefault(fold(str(n)), "agy plugin %s" % p.get("name"))
     return reserved
 
 
-def agy_copy(ctx, skill, label):
+def case_insensitive(path):
+    """Whether the volume holding path compares names without case: read-only, by looking up
+    an existing ancestor under its other case."""
+    p = path
+    while not os.path.lexists(p) and p != os.path.dirname(p):
+        p = os.path.dirname(p)
+    while p != os.path.dirname(p):
+        base = os.path.basename(p)
+        if base.lower() != base.upper():
+            other = os.path.join(os.path.dirname(p), base.swapcase())
+            return os.path.lexists(other) and os.path.samefile(other, p)
+        p = os.path.dirname(p)
+    return False
+
+
+def agy_copy(ctx, skill, label, owned):
+    """Copy one skill. `owned` maps a folded name to the name the state file records."""
     h, item, name = "agy", agy_item(skill), skill.name
     dest = os.path.join(ctx.paths.agy_skills, name)
-    record = ctx.state.data["agy"].get(name)
+    key = owned.get(ctx.fold(name))
+    record = ctx.state.data["agy"].get(key) if key else None
     try:
         digest, count = digest_tree(skill.path)
     except SymlinkError as e:
@@ -1880,76 +2137,97 @@ def agy_copy(ctx, skill, label):
                                                    "copied it; --adopt %s overwrites it (the "
                                                    "edited copy is archived)"
                                   % (tilde(dest), name), reason="edited")
-        if current == digest and record is not None:
+        if current == digest and record is not None and key == name:
             return ctx.report.add(h, item, "unchanged", label.split(" (")[0])
     if not ctx.apply:
         return ctx.report.add(h, item, "unchecked", "would copy %s, %s to %s"
                               % (label, files(count), tilde(dest)))
     archive = os.path.join(ctx.paths.archive, ctx.ts, "agy", name)
-    try:
-        got = install_tree(skill.path, dest, ctx.paths.agy_stage, archive, ctx.paths.agy_old)
-    except TreeError as e:
-        return ctx.report.add(h, item, "failed", str(e))
-    ctx.state.data["agy"][name] = {
-        "source": skill.plugin or "skill " + name, "path": skill.path, "revision": label,
-        "digest": got["digest"], "time": datetime.datetime.now().isoformat(timespec="seconds")}
-    ctx.save_state()
+    with critical():        # the swap and its record are one operation (spec §6)
+        try:
+            got = install_tree(skill.path, dest, ctx.paths.agy_stage, archive, ctx.paths.agy_old)
+        except TreeError as e:
+            return ctx.report.add(h, item, "failed", str(e))
+        ctx.state.data["agy"].pop(key, None)
+        ctx.state.data["agy"][name] = {
+            "source": skill.plugin or "skill " + name, "path": skill.path, "revision": label,
+            "digest": got["digest"], "time": datetime.datetime.now().isoformat(timespec="seconds")}
+        owned[ctx.fold(name)] = name
+        try:
+            ctx.save_state()
+        except (OSError, TreeError) as e:
+            return ctx.report.add(h, item, "failed", "copied to %s, but the state file could not "
+                                  "be written (%s); --adopt %s takes it over next run"
+                                  % (tilde(dest), e, name))
     detail = "%s, %s" % (label, files(got["files"]))
     if got["archived"]:
         detail += "; previous copy archived to %s" % tilde(got["archived"])
-    return ctx.report.add(h, item, "copied", detail)
+    return ctx.report.add(h, item, "copied", detail + got["note"])
 
 
 def sync_agy(ctx):
     h = "agy"
     if h not in ctx.harnesses or not harness_present(ctx, h):
         return
-    r = ctx.runner.run(["agy", "plugin", "list", "--json"])
-    plugins = json_document(r.stdout) if r.ok else None
-    if not isinstance(plugins, list):
-        ctx.report.add(h, "agy CLI", "failed", "cannot read its plugins: %s"
-                       % (r.error() if not r.ok else "unexpected output"))
-        return
+    plugins = []
+    if harness_home(ctx, h):
+        r = ctx.runner.run(["agy", "plugin", "list", "--json"])
+        plugins = json_document(r.stdout) if r.ok else None
+        if not isinstance(plugins, list):
+            ctx.report.add(h, "agy CLI", "failed", "cannot read its plugins: %s"
+                           % (r.error() if not r.ok else "unexpected output"))
+            return
     for p in (os.path.join(ctx.paths.home, ".gemini"), ctx.paths.gemini_config,
-              ctx.paths.agy_skills):
+              ctx.paths.agy_skills, ctx.paths.agy_stage, ctx.paths.agy_old):
         if os.path.islink(p):
             ctx.report.add(h, "skills folder", "failed", "%s is a symlink; agent-sync writes "
                                                          "nothing there" % tilde(p))
             return
-    selection = agy_selection(ctx)
-    reserved = agy_reserved(ctx, [p for p in plugins if isinstance(p, dict)])
+    # Names compare the way the destination volume compares them (spec §6).
+    ctx.fold = str.lower if case_insensitive(ctx.paths.agy_skills) else str
+    selection, unresolved = agy_selection(ctx)
+    reserved = agy_reserved(ctx, [p for p in plugins if isinstance(p, dict)], ctx.fold)
+    owned = {ctx.fold(n): n for n in ctx.state.data["agy"]}
     by_name = {}
     for skill, label in selection:
-        by_name.setdefault(skill.name, []).append((skill, label))
-    for name, entries in by_name.items():
+        by_name.setdefault(ctx.fold(skill.name), []).append((skill, label))
+    for key, entries in by_name.items():
         for skill, label in entries:
             others = [agy_item(s) for s, _ in entries if s is not skill]
-            if name in reserved:
-                others.append(reserved[name])
-            if others:
-                ctx.report.add(h, agy_item(skill), "failed",
-                               "name collision with %s; nothing written for %s; give one plugin "
-                               "an agy_skills subset" % (", ".join(others), name),
-                               reason="name collision")
-            elif skill.error:
-                ctx.report.add(h, agy_item(skill), "failed", skill.error)
-            else:
-                agy_copy(ctx, skill, label)
-    for name in sorted(set(ctx.state.data["agy"]) - set(by_name)):
+            if key in reserved:
+                others.append(reserved[key])
+            try:
+                if others:
+                    ctx.report.add(h, agy_item(skill), "failed", "name collision with %s; nothing "
+                                   "written for %s; give one plugin an agy_skills subset"
+                                   % (", ".join(others), skill.name), reason="name collision")
+                elif skill.error:
+                    ctx.report.add(h, agy_item(skill), "failed", skill.error)
+                else:
+                    agy_copy(ctx, skill, label, owned)
+            except ITEM_ERRORS as e:
+                ctx.report.add(h, agy_item(skill), "failed", str(e))
+    for name in sorted(set(ctx.state.data["agy"])):
+        source = ctx.state.data["agy"][name].get("source", "")
+        if ctx.fold(name) in by_name or source in unresolved or \
+                "@" + source.partition("@")[2] in unresolved:
+            continue        # still selected, or its selection is unknown this run
         dest = os.path.join(ctx.paths.agy_skills, name)
         if not ctx.args.prune or not ctx.apply:
             ctx.report.add(h, name, "orphaned", "%s left the manifest; --prune archives it"
                            % tilde(dest))
             continue
-        moved = None
-        if os.path.lexists(dest):
-            moved = archive_tree(dest, os.path.join(ctx.paths.archive, ctx.ts, "agy", name))
-        del ctx.state.data["agy"][name]
-        ctx.save_state()
+        try:
+            with critical():
+                moved = archive_tree(dest, os.path.join(ctx.paths.archive, ctx.ts, "agy", name)) \
+                    if os.path.lexists(dest) else None
+                del ctx.state.data["agy"][name]
+                ctx.save_state()
+        except ITEM_ERRORS as e:
+            ctx.report.add(h, name, "failed", "cannot archive %s: %s" % (tilde(dest), e))
+            continue
         ctx.report.add(h, name, "archived", "moved to %s" % tilde(moved) if moved else
                        "already gone; forgotten")
-    if any(row.harness == h and row.result in CHANGED for row in ctx.report.rows):
-        ctx.agy_changed = True
 
 
 def report_available(ctx):
@@ -2001,8 +2279,9 @@ def report_duplicates(ctx):
         root, sel = flat_root(ctx, h), ctx.selected.get(h, {})
         for n in flat_names(root):
             if n in sel and n not in ctx.manifest.external:
-                ctx.report.add(h, n, "duplicate", "plugin %s and %s; run `agent-sync cleanup`"
-                               % (sel[n][0], tilde(os.path.join(root, n))))
+                ctx.report.add(h, n, "duplicate", "plugin %s (%s) and %s; run `agent-sync "
+                               "cleanup`" % (sel[n][0], tilde(sel[n][3] or sel[n][1]),
+                                             tilde(os.path.join(root, n))))
 
 
 SYNC_STEPS[:] = [sync_claude, sync_codex, report_external, report_available, report_duplicates,
@@ -2042,7 +2321,8 @@ def unified_diff(copy, plugin):
 
 
 def cleanup_candidates(ctx):
-    """Observe Claude and Codex read-only, as a dry run does, and match their flat roots."""
+    """Observe Claude and Codex read-only, as a dry run does, and match their flat roots. A
+    copy is compared with the tree the harness loads, never with a newer catalog (spec §9)."""
     saved = ctx.report, ctx.dry_run, ctx.apply, ctx.fetch
     ctx.report, ctx.dry_run, ctx.apply, ctx.fetch = Report(), True, False, False
     try:
@@ -2056,12 +2336,30 @@ def cleanup_candidates(ctx):
         root, sel = flat_root(ctx, h), ctx.selected.get(h, {})
         for n in flat_names(root):
             if n in sel and n not in ctx.manifest.external:
-                pid, path, version = sel[n]
-                same, content = compare_trees(os.path.join(root, n), path)
-                out.append({"harness": h, "name": n, "path": os.path.join(root, n),
-                            "plugin": pid, "plugin_path": path, "version": version,
-                            "identical": same, "content": content})
+                pid, path, version, loaded = sel[n]
+                c = {"harness": h, "name": n, "path": os.path.join(root, n), "plugin": pid,
+                     "plugin_path": loaded or path, "version": version,
+                     "link": os.path.islink(os.path.join(root, n))}
+                same, c["content"] = compare_trees(c["path"], c["plugin_path"])
+                c["identical"] = same and loaded is not None and not c["link"]
+                if loaded is None:
+                    c["content"] = "the installed tree was not found; against the catalog: " \
+                        + c["content"]
+                out.append(c)
     return out, problems
+
+
+def provenance(ctx, name):
+    """The skills CLI's lock entry for a name, read-only, or None (spec §9)."""
+    try:
+        with open(os.path.join(ctx.paths.home, ".agents", ".skill-lock.json")) as f:
+            entry = json.load(f).get("skills", {}).get(name)
+    except (OSError, ValueError, AttributeError):
+        return None
+    if isinstance(entry, dict):
+        return "skills CLI lock entry, %s source; the entry is left in place" \
+            % entry.get("sourceType", "unknown")
+    return None
 
 
 def run_cleanup(ctx):
@@ -2074,8 +2372,8 @@ def run_cleanup(ctx):
     unknown = [n for n in args.yes if n not in {c["name"] for c in cands}]
     if unknown:
         raise UsageError("not a cleanup candidate: %s" % ", ".join(unknown))
-    with (contextlib.nullcontext() if args.dry_run else Lock(ctx.paths.lock)):
-        return cleanup_session(ctx, cands)
+    code = cleanup_session(ctx, cands)
+    return EXIT_FAILED if problems else code
 
 
 def cleanup_session(ctx, cands):
@@ -2084,13 +2382,19 @@ def cleanup_session(ctx, cands):
     if not cands:
         print("No flat copy shadows a managed, enabled plugin.")
     auto = stopped = False
-    archived = []
+    archived, code = [], EXIT_OK
     for i, c in enumerate(cands, 1):
         dest = os.path.join(ctx.paths.archive, ts, c["harness"], c["name"])
         print("[%d/%d] %s" % (i, len(cands), tilde(c["path"])))
         print("  shadows    skill %s of plugin %s, installed in %s %s"
               % (c["name"], c["plugin"], HARNESS_NAMES[c["harness"]], c["version"]))
         print("  content    " + c["content"])
+        if provenance(ctx, c["name"]):
+            print("  provenance " + provenance(ctx, c["name"]))
+        if c["link"]:
+            print("  action     none: a symlink is listed, never archived (moving a link changes "
+                  "what it points at)\n")
+            continue
         print("  action     move to %s" % tilde(dest))
         if args.dry_run or stopped:
             print()
@@ -2120,12 +2424,19 @@ def cleanup_session(ctx, cands):
         if answer == "q":
             stopped = True
         elif answer == "y":
-            moved = archive_tree(c["path"], dest)
-            ctx.state.data["cleanup"].setdefault(ts, []).append(
-                {"harness": c["harness"], "name": c["name"], "from": c["path"], "to": moved})
-            ctx.state.save()
-            archived.append(c["name"])
-            print("  archived")
+            try:
+                ensure_dir(flat_root(ctx, c["harness"]))
+                with critical():    # the move and its record are one operation
+                    moved = archive_tree(c["path"], dest)
+                    ctx.state.data["cleanup"].setdefault(ts, []).append(
+                        {"harness": c["harness"], "name": c["name"],
+                         "slot": os.path.basename(moved)})
+                    ctx.state.save()
+                archived.append(c["name"])
+                print("  archived")
+            except ITEM_ERRORS as e:
+                print("  not archived: %s" % e)
+                code = EXIT_FAILED
         print()
     print("Not touched:")
     synced = os.path.join(ctx.paths.codex_flat, "synced")
@@ -2141,31 +2452,42 @@ def cleanup_session(ctx, cands):
               "`skills list` will show archived copies as missing." % (len(archived),
                                                                        ", ".join(archived)))
         print("Undo: agent-sync cleanup --restore %s" % ts)
-    return EXIT_OK
+    return code
 
 
 def cleanup_restore(ctx, ts):
+    """Move one cleanup run's folders back. Paths are rebuilt from validated names, never read
+    from the state file; with --dry-run nothing moves (spec §9, §10)."""
     records = ctx.state.data["cleanup"].get(ts)
     if not records:
         raise UsageError("no cleanup run %s in %s" % (ts, tilde(ctx.paths.state)))
-    left = []
-    with Lock(ctx.paths.lock):
-        for rec in records:
-            if os.path.lexists(rec["from"]):
-                print("%s exists again; not restored (the archived copy stays at %s)"
-                      % (tilde(rec["from"]), tilde(rec["to"])))
-                left.append(rec)
-            elif not os.path.isdir(rec["to"]):
-                print("%s is missing from the archive; nothing to restore" % tilde(rec["to"]))
-            else:
-                archive_tree(rec["to"], rec["from"])
-                print("restored %s" % tilde(rec["from"]))
-        if left:
-            ctx.state.data["cleanup"][ts] = left
+    failed = False
+    for rec in list(records):
+        back = os.path.join(flat_root(ctx, rec["harness"]), rec["name"])
+        held = os.path.join(ctx.paths.archive, ts, rec["harness"], rec["slot"])
+        if os.path.lexists(back):
+            print("%s exists again; not restored (the archived copy stays at %s)"
+                  % (tilde(back), tilde(held)))
+        elif os.path.islink(held) or not os.path.isdir(held):
+            print("%s is missing from the archive, or not a folder; not restored" % tilde(held))
+        elif ctx.args.dry_run:
+            print("would restore %s from %s" % (tilde(back), tilde(held)))
+            continue
         else:
-            del ctx.state.data["cleanup"][ts]
-        ctx.state.save()
-    return EXIT_FAILED if left else EXIT_OK
+            try:
+                ensure_dir(flat_root(ctx, rec["harness"]))
+                with critical():    # the move and its record are one operation
+                    archive_tree(held, back)
+                    records.remove(rec)
+                    if not records:
+                        del ctx.state.data["cleanup"][ts]
+                    ctx.state.save()
+                print("restored %s" % tilde(back))
+                continue
+            except ITEM_ERRORS as e:
+                print("%s not restored: %s" % (tilde(back), e))
+        failed = True
+    return EXIT_FAILED if failed else EXIT_OK
 
 
 if __name__ == "__main__":

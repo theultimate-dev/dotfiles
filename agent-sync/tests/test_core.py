@@ -67,6 +67,7 @@ class Digest(support.SandboxCase, unittest.TestCase):
 class InstallTree(support.SandboxCase, unittest.TestCase):
     def setUp(self):
         super().setUp()
+        self.enterContext(self.sb.active())     # writes are checked against $HOME and XDG
         self.config = os.path.join(self.sb.home, ".gemini", "config")
         self.dest = os.path.join(self.config, "skills", "s")
         self.stage = os.path.join(self.config, ".agent-sync-stage")
@@ -178,6 +179,10 @@ class InstallTree(support.SandboxCase, unittest.TestCase):
 
 
 class StateFile(support.SandboxCase, unittest.TestCase):
+    def setUp(self):
+        super().setUp()
+        self.enterContext(self.sb.active())
+
     def test_round_trip_and_true_no_op(self):
         path = os.path.join(self.sb.state_dir, "state.json")
         st = A.State(path)
@@ -215,8 +220,10 @@ class Runner(support.SandboxCase, unittest.TestCase):
         self.assertNotEqual(r.returncode, 0)
         call = self.sb.calls("git")[0]
         self.assertFalse(call["stdin_tty"])
-        log = os.path.join(self.sb.root, "last-run.log")
-        runner.write_log(log)
+        self.assertTrue(call["stdin_devnull"], "stdin is /dev/null itself, not merely no tty")
+        log = os.path.join(self.sb.state_dir, "last-run.log")
+        with self.sb.active():
+            runner.write_log(log)
         with open(log) as f:
             text = f.read()
         self.assertNotIn("secret-token", text)

@@ -56,6 +56,15 @@ DEVIATIONS = [
     ("=5c1e…", "=" + HELD_SHA),
     # Spec §10's table wins over the sample: a stale cache exits 1 even when items are held.
     ("Exit 3 (held items; nothing failed)", "Exit 1 (stale items)"),
+    # Claude reads planning from the checkout folder (readFromFolder): a live row, as the
+    # summary line of the sample already counts the checkout marketplace (spec §5.1, C2).
+    ("claude   planning@example-skills                unchanged    0.4.0, enabled, user",
+     "claude   planning@example-skills                live         0.4.0, enabled, user"),
+    ("3 changed · 4 unchanged · 1 live", "3 changed · 3 unchanged · 2 live"),
+    # A duplicate row names the tree the harness loads, so the two copies can be compared.
+    ("plugin planning@example-skills and ~/.agents/skills/shaping-briefs",
+     "plugin planning@example-skills (~/.codex/plugins/cache/example-skills/planning/0.4.0/"
+     "skills/shaping-briefs) and ~/.agents/skills/shaping-briefs"),
 ]
 
 CHECKOUT = "3f2a91c" + "0" * 33
@@ -160,7 +169,9 @@ class SampleReport(support.SandboxCase, unittest.TestCase):
 
 
 class Combinations(unittest.TestCase):
-    """Dry run, run, run again: the second run changes nothing and writes nothing."""
+    """Dry run, run, run again. The second run changes nothing: its state file, archive and agy
+    folders keep their mtimes, and the Git cache and every harness home keep their bytes. Only
+    the lock and last-run.log may be written, and the refresh verbs and fetches run (spec §10)."""
 
     def check(self, combo):
         sb = support.Sandbox()
@@ -176,15 +187,33 @@ class Combinations(unittest.TestCase):
         self.assertGreater(summary["summary"]["changed"], 0)
         for h in combo:
             self.assertTrue(any(x["harness"] == h for x in rows(first)[0]), h)
-        state = os.path.join(sb.state_dir, "state.json")
-        stamp = os.stat(state).st_mtime_ns if os.path.exists(state) else None
+        state_dir = scenario.mtimes(sb.state_dir)
+        for allowed in ("lock", "last-run.log"):
+            state_dir.pop(allowed, None)
         gemini = scenario.mtimes(os.path.join(sb.home, ".gemini"))
+        homes = {p: scenario.contents(p) for p in (
+            os.path.join(sb.cache_home, "agent-sync"), sb.claude_home, sb.codex_home,
+            os.path.join(sb.home, ".gemini"))}
+        sb.clear_calls()
         second = sb.run("--json")
         got, summary = rows(second)
         self.assertEqual(second.returncode, 0, second.stdout + second.stderr)
         self.assertEqual(summary["summary"]["changed"], 0, second.stdout)
-        self.assertEqual(os.stat(state).st_mtime_ns if os.path.exists(state) else None, stamp)
+        after = scenario.mtimes(sb.state_dir)
+        for allowed in ("lock", "last-run.log"):
+            after.pop(allowed, None)
+        self.assertEqual(after, state_dir, "state.json and the archive are untouched")
         self.assertEqual(scenario.mtimes(os.path.join(sb.home, ".gemini")), gemini)
+        for path, before in homes.items():
+            now = scenario.contents(path)
+            if path == sb.codex_home:   # the fake's own memory of C3's first upgrade
+                before, now = dict(before), dict(now)
+                before.pop("fake-state.json", None)
+                now.pop("fake-state.json", None)
+            self.assertEqual(now, before, path)
+        if "claude" in combo or "codex" in combo:
+            self.assertTrue([a for a in sb.argvs("git") if "fetch" in a],
+                            "the Git sources are fetched every run")
         check = sb.run("--check")
         self.assertEqual(check.returncode, 0, check.stdout)
 
@@ -206,8 +235,8 @@ class Interrupted(support.SandboxCase, unittest.TestCase):
         real_copy = A.agy_copy
         copied = []
 
-        def copy_then_interrupt(ctx, skill, label):
-            row = real_copy(ctx, skill, label)
+        def copy_then_interrupt(ctx, skill, *rest):
+            row = real_copy(ctx, skill, *rest)
             copied.append(skill.name)
             if len(copied) == 2:
                 raise KeyboardInterrupt

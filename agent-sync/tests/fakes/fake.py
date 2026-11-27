@@ -13,7 +13,9 @@ Behaviour the tests script goes in $FAKE_STATE/config.json:
                "update": {plugin_id: new_version},                    update finds a new version
                "fail": {verb: message}}                               that verb fails
     codex     {"fail": {verb: message},
-               "upgrade_skips": [plugin_id]}                         upgrade leaves its cache
+               "upgrade_skips": [plugin_id],                         upgrade leaves its cache
+               "disabled": [plugin_id],                              listed with enabled: false
+               "unlisted": [plugin_id]}                              add succeeds, list omits it
     agy       {"plugins": [...]}                                      `agy plugin list --json`
 """
 
@@ -36,8 +38,15 @@ def config():
 
 
 def log_call(name, argv):
+    try:
+        st, null = os.fstat(0), os.stat(os.devnull)
+        devnull = (st.st_rdev, st.st_mode & 0o170000) == (null.st_rdev, null.st_mode & 0o170000)
+    except OSError:
+        devnull = False
     entry = {"cmd": name, "argv": argv, "cwd": os.getcwd(), "stdin_tty": sys.stdin.isatty(),
-             "nonessential_traffic": os.environ.get("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC")}
+             "stdin_devnull": devnull,
+             "nonessential_traffic": os.environ.get("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"),
+             "git_env": sorted(k for k in os.environ if k.startswith("GIT_"))}
     with open(os.path.join(state_dir(), "calls.jsonl"), "a") as f:
         f.write(json.dumps(entry) + "\n")
 
@@ -188,9 +197,11 @@ def claude(argv):
                      message="Plugin %s not found in marketplace %s" % (plugin, mname)))
             return 1
         held = cfg.get("held", {}).get(pid)
-        if held and st["accepted"].get(pid) != held["sha256"]:
+        remembered = verb == "update" and st["accepted"].get(pid) == held.get("command") \
+            if held else True
+        if held and not remembered:
             if accept == held["sha256"]:
-                st["accepted"][pid] = accept
+                st["accepted"][pid] = held["command"]
             else:
                 shown = {"kind": "command_source", "pluginId": pid, "command": held["command"],
                          "mode": "copy", "catalogRevision": "git:" + "1" * 40,
@@ -334,13 +345,17 @@ def codex(argv):
         roots = []
         if m and m["sourceType"] == "git":
             tree = remote_tree(m["source"], m.get("ref"))
-            if tree["sha"] != m.get("sha"):  # an unmoved ref skips snapshot and caches (C3)
+            # C3: upgradedRoots 1, 0, 0 -- the first upgrade refreshes, an unmoved ref then skips
+            if tree["sha"] != m.get("sha") or not m.get("upgraded"):
                 snapshot(m)
                 for p in st["plugins"]:
                     if p["marketplaceName"] == m["name"] and \
                             p["pluginId"] not in cfg.get("upgrade_skips", []):
-                        install(m, p["name"])
+                        got = install(m, p["name"])
+                        if got:
+                            p["version"] = got[0]
                 roots.append(m["root"])
+            m["upgraded"] = True
         save(path, st)
         out({"selectedMarketplaces": [args[2]], "upgradedRoots": roots, "errors": []})
         return 0
@@ -354,8 +369,9 @@ def codex(argv):
                   file=sys.stderr)
             return 1
         version, dest = got
-        st["plugins"] = [p for p in st["plugins"] if p["pluginId"] != pid] + [
-            {"pluginId": pid, "name": plugin, "marketplaceName": mname, "version": version}]
+        st["plugins"] = [p for p in st["plugins"] if p["pluginId"] != pid] + (
+            [] if pid in cfg.get("unlisted", []) else
+            [{"pluginId": pid, "name": plugin, "marketplaceName": mname, "version": version}])
         save(path, st)
         codex_config_toml(home, st)
         out({"pluginId": pid, "name": plugin, "marketplaceName": mname, "version": version,
@@ -366,7 +382,12 @@ def codex(argv):
         for p in st["plugins"]:
             if only and p["marketplaceName"] != only:
                 continue
-            installed.append(dict(p, installed=True, enabled=True))
+            installed.append(dict(p, installed=True,
+                                  enabled=p["pluginId"] not in cfg.get("disabled", []),
+                                  source={"source": "local", "path": os.path.join(
+                                      home, ".tmp", "marketplaces", p["marketplaceName"],
+                                      "plugins", p["name"])},
+                                  installPolicy="AVAILABLE", authPolicy="ON_INSTALL"))
         out({"installed": installed, "available": []})
         return 0
     print("Error: stdin is not a terminal", file=sys.stderr)
@@ -387,11 +408,15 @@ def agy(argv):
 
 def git(argv):
     args = list(argv)
-    cwd = None
-    if args[:1] == ["-C"]:
-        cwd = args[1]
+    cwd, links = None, True
+    while args[:1] in (["-C"], ["--git-dir"], ["--work-tree"], ["-c"]):
+        key, value = args[:2]
         args = args[2:]
-    drop(args, "--no-optional-locks")
+        if key in ("-C", "--work-tree"):
+            cwd = value
+        if key == "-c" and value == "core.symlinks=false":
+            links = False
+    drop(args, "--no-optional-locks", "--")
     meta_path = os.path.join(cwd or ".", ".git", "fake.json")
     meta = load(meta_path, None)
     if args[:2] == ["clone", "--no-checkout"]:
@@ -419,7 +444,15 @@ def git(argv):
                 p = os.path.join(cwd, name)
                 shutil.rmtree(p) if os.path.isdir(p) else os.remove(p)
         tree = meta["fetched"]
-        shutil.copytree(tree["tree"], cwd, dirs_exist_ok=True)
+        shutil.copytree(tree["tree"], cwd, dirs_exist_ok=True, symlinks=True)
+        for d, dirs, names in os.walk(cwd):
+            for n in dirs + names:      # core.symlinks=false: a link is a file holding its target
+                p = os.path.join(d, n)
+                if os.path.islink(p) and not links:
+                    target = os.readlink(p)
+                    os.remove(p)
+                    with open(p, "w") as f:
+                        f.write(target)
         meta["head"] = tree["sha"]
         save(meta_path, meta)
         return 0

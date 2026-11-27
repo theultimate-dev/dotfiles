@@ -20,6 +20,10 @@ class Codex(support.SandboxCase, unittest.TestCase):
         scenario.setup(self.sb, harnesses='["codex"]')
         r = self.sb.run()
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        # C3: Codex's first upgrade after an add refreshes every cache of the marketplace; only
+        # later upgrades on an unmoved ref leave a stale cache in place.
+        r = self.sb.run()
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.cache = os.path.join(self.sb.codex_home, "plugins", "cache", "example-skills",
                                   "planning", "0.4.0")
 
@@ -105,7 +109,8 @@ class Codex(support.SandboxCase, unittest.TestCase):
         got, _ = rows(r)
         self.assertIn("unverifiable", [x["result"] for x in
                                        find(got, "codex", "marketplace example-skills")])
-        self.assertEqual(find(got, "codex", PID)[0]["result"], "unchanged")
+        self.assertEqual(find(got, "codex", PID)[0]["result"], "skipped",
+                         "unverifiable metadata changes nothing below it")
         self.assertEqual(os.stat(cfg).st_mtime_ns, before)
         self.assertEqual(r.returncode, 0)
 

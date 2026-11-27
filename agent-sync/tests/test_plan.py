@@ -111,7 +111,7 @@ class Plan(support.SandboxCase, unittest.TestCase):
         for cmd in ("claude", "codex"):
             for argv in self.sb.argvs(cmd):
                 self.assertIn("list", argv, argv)
-        self.assertEqual([a for a in self.sb.argvs("git") if a[2] in ("clone", "fetch")], [])
+        self.assertEqual([a for a in self.sb.argvs("git") if {"clone", "fetch"} & set(a)], [])
         self.assertFalse(os.path.exists(self.sb.state_dir))
         self.assertFalse(os.path.exists(self.sb.cache_home))
         got, _ = rows(r)
@@ -264,6 +264,8 @@ class Enrolment(support.SandboxCase, unittest.TestCase):
         for cmd in ("claude", "codex"):
             for argv in self.sb.argvs(cmd):
                 self.assertIn("list", argv)
+        self.assertEqual(sorted(os.listdir(self.sb.state_dir)), ["last-run.log", "lock"],
+                         "a check records nothing: no state file, no archive")
 
 
 if __name__ == "__main__":

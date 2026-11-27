@@ -98,6 +98,23 @@ def write_skill(path, name, body="Fixture skill.", front_name=None):
         f.write("---\nname: %s\ndescription: test\n---\n\n%s\n" % (front_name or name, body))
 
 
+def contents(root):
+    """Every path under root with its bytes' digest, a link's target, or 'dir'."""
+    import hashlib
+    out = {}
+    for d, dirs, names in os.walk(root):
+        for n in dirs + names:
+            p = os.path.join(d, n)
+            if os.path.islink(p):
+                out[os.path.relpath(p, root)] = "link:" + os.readlink(p)
+            elif os.path.isdir(p):
+                out[os.path.relpath(p, root)] = "dir"
+            else:
+                with open(p, "rb") as f:
+                    out[os.path.relpath(p, root)] = hashlib.sha256(f.read()).hexdigest()
+    return out
+
+
 def mtimes(root):
     out = {}
     for d, dirs, names in os.walk(root):

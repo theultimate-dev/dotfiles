@@ -167,9 +167,10 @@ class AgyCopy(support.SandboxCase, unittest.TestCase):
         r, got = self.run_json()
         row = find(got, "agy", "writing-release-notes")[0]
         self.assertEqual((row["result"], row["detail"]), ("copied", "6666666, 1 file"))
-        self.assertIn(["clone", "--no-checkout", url, os.path.join(
-            self.sb.cache_home, "agent-sync", "sources", "skill-writing-release-notes")],
-            self.sb.argvs("git"))
+        cache = os.path.join(self.sb.cache_home, "agent-sync", "sources",
+                             "skill-writing-release-notes")
+        self.assertIn(["-c", "core.symlinks=false", "clone", "--no-checkout", "--", url, cache],
+                      self.sb.argvs("git"))
 
 
 class Resolution(support.SandboxCase, unittest.TestCase):

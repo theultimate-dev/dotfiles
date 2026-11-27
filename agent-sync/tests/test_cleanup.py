@@ -59,8 +59,9 @@ class Duplicates(Machine, unittest.TestCase):
         codex = find(got, "codex", result="duplicate")
         self.assertEqual(sorted(x["item"] for x in codex), ["framing-ideas", "shaping-briefs"])
         self.assertEqual(find(got, "codex", "shaping-briefs")[0]["detail"],
-                         "plugin planning@example-skills and ~/.agents/skills/shaping-briefs; "
-                         "run `agent-sync cleanup`")
+                         "plugin planning@example-skills (~/.codex/plugins/cache/example-skills/"
+                         "planning/0.4.0/skills/shaping-briefs) and ~/.agents/skills/"
+                         "shaping-briefs; run `agent-sync cleanup`")
         self.assertEqual([x["item"] for x in find(got, "claude", result="duplicate")],
                          ["deploying-apps"])
 
