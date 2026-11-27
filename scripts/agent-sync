@@ -693,14 +693,16 @@ def _raise(e):
 def walk(root, follow=False):
     """os.walk that raises at the first folder it cannot list, so a tree read in part is never
     taken for the whole tree (spec §10, an error is never absence). With follow, a tree a
-    harness owns is read through its links, and a folder reached twice is a loop and raises."""
-    seen = set()
+    harness owns is read through its links. A loop is a folder that leads back to one of its
+    own ancestors, and raises; two links to one shared folder are not a loop."""
+    chains = {}
     for d, dirs, names in os.walk(root, onerror=_raise, followlinks=follow):
         if follow:
             real = os.path.realpath(d)
-            if real in seen:
-                raise OSError(errno.ELOOP, "a folder reached twice through links", d)
-            seen.add(real)
+            above = chains.get(os.path.dirname(d), ()) if d != root else ()
+            if real in above:
+                raise OSError(errno.ELOOP, "a link that leads back to its own ancestor", d)
+            chains[d] = above + (real,)
         yield d, dirs, names
 
 
@@ -1759,7 +1761,7 @@ def git_refresh(ctx, h, m, src, state, argv, judge, unmoved=""):
 
 def checkout_digest(path):
     try:
-        return digest_tree(path)[0]
+        return digest_tree(os.path.realpath(path))[0]     # the root is trusted as given (§10)
     except (SymlinkError, OSError):
         return None
 
@@ -2268,8 +2270,9 @@ def agy_selection(ctx):
                 skills = [s for s in skills if s.name in e.agy_skills]
             out += [(s, src.label()) for s in skills]
     for s in ctx.manifest.skills:
-        if s.path:
-            out.append((Skill(s.name, s.path, None, front_matter_error(s.path)), None))
+        if s.path:      # a root you chose is trusted as given, link or not; beneath it, not (§10)
+            out.append((Skill(s.name, os.path.realpath(s.path), None,
+                              front_matter_error(s.path)), None))
             continue
         src = git_source(ctx, "skill", git_url(s.git), s.ref)
         path = os.path.join(src.tree, s.subdir) if src.tree and s.subdir else src.tree
@@ -2561,10 +2564,11 @@ SYNC_STEPS[:] = [sync_claude, sync_codex, report_external, report_available, rep
 HARNESS_NAMES = {"claude": "Claude Code", "codex": "Codex"}
 
 
-def compare_trees(copy, plugin):
-    """The content line for a candidate; a tree that cannot be read says so."""
+def compare_trees(copy, plugin, follow):
+    """The content line for a candidate; a tree that cannot be read says so. follow only for
+    the tree a harness owns, never for a catalog used as the fallback (spec §10)."""
     try:
-        mine, theirs = tree_files(copy), tree_files(plugin, True)
+        mine, theirs = tree_files(copy), tree_files(plugin, follow)
     except OSError as e:
         return "cannot be read (%s), so it is never identical" % e
     changed = sorted(p for p in mine if p in theirs and mine[p] != theirs[p])
@@ -2582,8 +2586,8 @@ def compare_trees(copy, plugin):
     return "DIFFERS from the plugin: " + ", ".join(parts)
 
 
-def unified_diff(copy, plugin):
-    mine, theirs = tree_files(copy), tree_files(plugin, True)
+def unified_diff(copy, plugin, follow):
+    mine, theirs = tree_files(copy), tree_files(plugin, follow)
     out = []
     for rel in sorted(set(mine) | set(theirs)):
         a = theirs.get(rel, b"").decode(errors="replace").splitlines(True)
@@ -2603,6 +2607,33 @@ def blocked(path):
     except OSError as e:
         return "it cannot be read in full (%s)" % e
     return None
+
+
+def installed_links(copy, installed):
+    """(links, why): the links in the installed tree a candidate is compared with, relative to
+    it, and why the candidate is blocked, or None. It is blocked when the tree, or a link in it,
+    resolves into the copy, since the plugin then depends on the copy, or when the tree cannot
+    be read in full, so that cannot be ruled out (spec §10, cleanup and links)."""
+    mine, links = os.path.realpath(copy), []
+
+    def into(p):
+        r = os.path.realpath(p)
+        return r == mine or r.startswith(mine + os.sep) or mine.startswith(r + os.sep)
+
+    try:
+        if into(installed):
+            return [], "the installed plugin is this copy, reached through a link"
+        for d, dirs, names in walk(installed, True):
+            for n in dirs + names:
+                if kind_of(os.path.join(d, n)) == "link":
+                    links.append(os.path.relpath(os.path.join(d, n), installed))
+                    if into(os.path.join(d, n)):
+                        return links, "the installed plugin's link %s resolves into it, so " \
+                            "the plugin depends on this copy" % links[-1]
+    except OSError as e:
+        return links, "the installed tree cannot be read in full (%s), so it cannot be " \
+            "shown not to depend on this copy" % e
+    return links, None
 
 
 def snapshot(path, follow=False):
@@ -2635,10 +2666,12 @@ def cleanup_candidates(ctx):
     cands = []
     for h, root, n, (pid, path, version, loaded) in out:
         c = {"harness": h, "name": n, "path": os.path.join(root, n), "plugin": pid,
-             "plugin_path": loaded or path, "version": version,
-             "blocked": blocked(os.path.join(root, n)), "digest": snapshot(os.path.join(root, n))}
+             "plugin_path": loaded or path, "version": version, "follow": loaded is not None,
+             "digest": snapshot(os.path.join(root, n))}
+        c["links"], depends = installed_links(c["path"], loaded) if loaded else ([], None)
+        c["blocked"] = blocked(c["path"]) or depends
         c["content"] = c["blocked"] + "; not compared" if c["blocked"] else \
-            compare_trees(c["path"], c["plugin_path"])
+            compare_trees(c["path"], c["plugin_path"], c["follow"])
         # Identical needs two digests actually computed: an unreadable tree, or one holding a
         # link, is equal to nothing (spec §10).
         c["identical"] = loaded is not None and not c["blocked"] and \
@@ -2694,9 +2727,11 @@ def cleanup_session(ctx, cands, kept=()):
         print("  content    " + c["content"])
         if provenance(ctx, c["name"]):
             print("  provenance " + provenance(ctx, c["name"]))
+        if c["links"]:
+            print("  installed  holds links (%s), so this copy is never archived "
+                  "automatically" % ", ".join(c["links"][:5]))
         if c["blocked"]:
-            print("  action     none: %s, so it is listed and never archived (moving a link "
-                  "changes what it points at; an unread part may be yours)\n" % c["blocked"])
+            print("  action     none: %s, so it is listed and never archived\n" % c["blocked"])
             continue
         print("  action     move to %s" % tilde(dest))
         if args.dry_run or stopped:
@@ -2704,7 +2739,7 @@ def cleanup_session(ctx, cands, kept=()):
             continue
         if args.yes:
             answer = "y" if c["name"] in args.yes else "n"
-        elif auto and c["identical"]:
+        elif auto and c["identical"] and not c["links"]:
             answer = "y"
         else:
             answer = None
@@ -2720,13 +2755,15 @@ def cleanup_session(ctx, cands, kept=()):
             answer = {"y": "y", "n": "n", "d": "d", "a": "a", "q": "q"}.get(line.strip()[:1])
             if answer == "d":
                 try:
-                    print(unified_diff(c["path"], c["plugin_path"]) or "(no differences)")
+                    print(unified_diff(c["path"], c["plugin_path"], c["follow"]) or
+                          "(no differences)")
                 except OSError as e:
                     print("cannot be read: %s" % e)
                 answer = None
             elif answer == "a":
                 auto = True
-                answer = "y" if c["identical"] else "n"     # a differing copy is kept
+                # A differing copy is kept, and so is one whose installed tree holds links.
+                answer = "y" if c["identical"] and not c["links"] else "n"
             if answer == "y" and not args.yes:
                 answer = recheck(ctx, c)
         if answer == "q":
@@ -2735,7 +2772,8 @@ def cleanup_session(ctx, cands, kept=()):
             try:
                 def unchanged(c=c):     # the whole check again, at the move (spec §10)
                     now = snapshot(c["path"])
-                    why = blocked(c["path"])
+                    why = blocked(c["path"]) or c["follow"] and \
+                        installed_links(c["path"], c["plugin_path"])[1]
                     if why or now is None or now != c["digest"]:
                         raise TreeError("%s; run cleanup again to see it" % (
                             why or "it changed since it was shown, or cannot be read"))
@@ -2788,7 +2826,7 @@ def recheck(ctx, c):
         print("  it cannot be read now, or holds a symlink; not archived")
         return "n"
     c["digest"], c["identical"] = now, False
-    c["content"] = compare_trees(c["path"], c["plugin_path"])
+    c["content"] = compare_trees(c["path"], c["plugin_path"], c["follow"])
     print("  changed since it was shown; it now reads:\n  content    " + c["content"])
     return None
 

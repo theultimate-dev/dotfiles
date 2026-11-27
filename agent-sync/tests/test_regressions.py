@@ -2009,5 +2009,215 @@ class Review5SourceRoots(support.SandboxCase, unittest.TestCase):
                          "failed", r.stdout)
 
 
+
+# ── Review 6 (02444da): each probe case, then one test per sentence of "Cleanup and links on the
+# installed side" (§10) ────────────────────────────────────────────────────────────────────────
+
+
+def codex_flat(test, *names):
+    """Codex installed from the checkout, with flat copies in ~/.agents/skills of the named
+    planning skills -> (cache skills folder, flat root)."""
+    codex_checkout(test)
+    cache = os.path.join(test.sb.codex_home, "plugins", "cache", "example-skills", "planning",
+                         "0.4.0", "skills")
+    flat = os.path.join(test.sb.home, ".agents", "skills")
+    for n in names:
+        shutil.copytree(os.path.join(cache, n), os.path.join(flat, n))
+    return cache, flat
+
+
+def relink(path, target):
+    """Replace path with a symlink to target."""
+    if os.path.isdir(path) and not os.path.islink(path):
+        shutil.rmtree(path)
+    else:
+        os.remove(path)
+    os.symlink(target, path)
+
+
+def elsewhere(test, src, name):
+    """An independent copy of src outside every tree agent-sync compares -> its path."""
+    dest = os.path.join(test.sb.home, "elsewhere", name)
+    os.makedirs(os.path.dirname(dest), exist_ok=True)
+    (shutil.copytree if os.path.isdir(src) else shutil.copy)(src, dest)
+    return dest
+
+
+class Review6Probes(support.SandboxCase, unittest.TestCase):
+    """The probe-6 cases, with the expected behaviour."""
+
+    def test_r6_b1_a_copy_the_installed_plugin_depends_on_is_kept(self):
+        for sub in ("SKILL.md", "references"):
+            with self.subTest(linked=sub):
+                self.sb.close()
+                self.sb = support.Sandbox()
+                cache, flat = codex_flat(self, "framing-ideas")
+                installed = os.path.join(cache, "framing-ideas", sub)
+                relink(installed, os.path.join(flat, "framing-ideas", sub))
+                r = self.sb.run("cleanup", input="a\n")
+                self.assertTrue(os.path.isdir(os.path.join(flat, "framing-ideas")), r.stdout)
+                self.assertTrue(os.path.exists(installed))
+                self.assertIn("depends on this copy", r.stdout)
+                self.assertNotIn("Undo:", r.stdout)
+        self.addCleanup(lambda: self.sb.close())
+
+    def test_r6_sf2_two_links_to_one_shared_folder_are_not_a_loop(self):
+        checkout = codex_checkout(self)
+        src = os.path.join(checkout, "plugins", "planning", "skills", "framing-ideas")
+        for folder in ("same-one", "same-two"):
+            os.mkdir(os.path.join(src, folder))
+            with open(os.path.join(src, folder, "note.md"), "w") as f:
+                f.write("same bytes")
+        self.assertEqual(self.sb.run("--repair").returncode, 0)    # the cache now holds them
+        skill = os.path.join(self.sb.codex_home, "plugins", "cache", "example-skills",
+                             "planning", "0.4.0", "skills", "framing-ideas")
+        shared = elsewhere(self, os.path.join(skill, "same-one"), "shared-assets")
+        for folder in ("same-one", "same-two"):
+            relink(os.path.join(skill, folder), shared)
+        r = self.sb.run("--check", "--json")
+        self.assertEqual(find(rows(r)[0], "codex", "planning@example-skills")[0]["result"],
+                         "unchanged", r.stdout)
+
+    def test_r6_sf1_the_fallback_catalog_is_never_read_through_a_link(self):
+        cache, flat = codex_flat(self, "framing-ideas")
+        shutil.rmtree(os.path.join(cache, "framing-ideas"))
+        outside = os.path.join(self.sb.home, "outside-catalog.txt")
+        with open(outside, "w") as f:
+            f.write("bytes beyond the source root\n")
+        os.symlink(outside, os.path.join(self.sb.home, "src", "example-skills", "plugins",
+                                         "planning", "skills", "framing-ideas", "outside.txt"))
+        r = self.sb.run("cleanup", input="d\nq\n")
+        self.assertNotIn("bytes beyond the source root", r.stdout)
+        self.assertTrue(os.path.isdir(os.path.join(flat, "framing-ideas")))
+
+    def test_r6_sf3_a_linked_loose_skill_root_is_used_as_chosen(self):
+        actual = os.path.join(self.sb.home, "original", "review-note")
+        scenario.write_skill(actual, "review-note")
+        alias = os.path.join(self.sb.home, "selected", "review-note")
+        os.makedirs(os.path.dirname(alias))
+        os.symlink(actual, alias)
+        loose(self.sb, ("review-note", alias))
+        r = self.sb.run("--json")
+        self.assertEqual(r.returncode, 0, r.stdout)
+        self.assertTrue(os.path.isfile(os.path.join(self.sb.agy_skills, "review-note",
+                                                    "SKILL.md")))
+        self.assertFalse(os.path.islink(os.path.join(self.sb.agy_skills, "review-note")))
+
+
+class Review6InstalledLinks(support.SandboxCase, unittest.TestCase):
+    """Rule, one test per sentence of "Cleanup and links on the installed side" (spec §10)."""
+
+    def fresh(self):
+        self.sb.close()
+        self.sb = support.Sandbox()
+
+    def test_r6_rule_1_an_installed_tree_with_links_is_never_archived_automatically(self):
+        """When the installed tree holds any link, `a` skips the candidate, it is asked about by
+        itself, and the links are named."""
+        for answers, archived in (("a\n", ["framing-ideas"]),
+                                  ("a\ny\n", ["framing-ideas", "shaping-briefs"])):
+            with self.subTest(answers=answers):
+                self.fresh()
+                cache, flat = codex_flat(self, "framing-ideas", "shaping-briefs")
+                marker = os.path.join(cache, "shaping-briefs", "SKILL.md")
+                relink(marker, elsewhere(self, marker, "SKILL.md"))
+                r = self.sb.run("cleanup", input=answers)
+                self.assertIn("holds links (SKILL.md)", r.stdout)
+                self.assertIn("identical to the plugin", r.stdout, "followed for comparison")
+                self.assertEqual(r.stdout.count("Archive this copy?"), 2, r.stdout)
+                self.assertEqual(sorted(n for n in ("framing-ideas", "shaping-briefs")
+                                        if not os.path.exists(os.path.join(flat, n))), archived)
+        self.addCleanup(lambda: self.sb.close())
+
+    def test_r6_rule_2_a_link_into_the_candidate_blocks_it_from_every_answer(self):
+        """When one of those links resolves into the candidate, no answer archives it."""
+        forms = {
+            "the installed skill folder": lambda cache, flat: relink(
+                os.path.join(cache, "framing-ideas"), os.path.join(flat, "framing-ideas")),
+            "a file two levels down": lambda cache, flat: relink(
+                os.path.join(cache, "framing-ideas", "references", "examples.md"),
+                os.path.join(flat, "framing-ideas", "references", "examples.md")),
+            "a folder": lambda cache, flat: relink(
+                os.path.join(cache, "framing-ideas", "templates"),
+                os.path.join(flat, "framing-ideas", "templates")),
+        }
+        for form, answer in [(f, a) for f in sorted(forms) for a in ("y", "a", "--yes")]:
+            with self.subTest(link=form, answer=answer):
+                self.fresh()
+                cache, flat = codex_flat(self, "framing-ideas")
+                forms[form](cache, flat)
+                r = self.sb.run("cleanup", "--yes", "framing-ideas") if answer == "--yes" else \
+                    self.sb.run("cleanup", input=answer + "\n")
+                self.assertTrue(os.path.isdir(os.path.join(flat, "framing-ideas")), r.stdout)
+                self.assertIn("listed and never archived", r.stdout)
+                self.assertEqual(read_state(self.sb)["cleanup"], {})
+        self.addCleanup(lambda: self.sb.close())
+
+    def test_r6_rule_2_a_dependency_made_while_the_prompt_is_open_is_caught_at_the_move(self):
+        cache, flat = codex_flat(self, "framing-ideas")
+        installed = os.path.join(cache, "framing-ideas", "templates")
+
+        class Answer:
+            def readline(self):
+                relink(installed, os.path.join(flat, "framing-ideas", "templates"))
+                return "y\n"
+
+        code, out, _ = captured(self.sb, ["cleanup"], stdin=Answer())
+        self.assertTrue(os.path.isdir(os.path.join(flat, "framing-ideas")), out)
+        self.assertTrue(os.path.exists(installed))
+        self.assertIn("depends on this copy", out)
+        self.assertEqual(code, 1)
+
+    def test_r6_rule_3_links_are_followed_only_in_a_tree_a_harness_owns(self):
+        """A catalog used as the fallback comparison is read without following."""
+        cache, flat = codex_flat(self, "framing-ideas")
+        templates = os.path.join(cache, "framing-ideas", "templates")
+        relink(templates, elsewhere(self, templates, "templates"))
+        r = self.sb.run("cleanup", "--dry-run")
+        self.assertIn("identical to the plugin", r.stdout, "the installed tree is followed")
+        shutil.rmtree(os.path.join(cache, "framing-ideas"))
+        source = os.path.join(self.sb.home, "src", "example-skills", "plugins", "planning",
+                              "skills", "framing-ideas", "templates", "note.md")
+        relink(source, elsewhere(self, source, "note.md"))
+        r = self.sb.run("cleanup", "--dry-run")
+        self.assertIn("against the catalog: cannot be read", r.stdout)
+
+    def test_r6_rule_4_a_loop_is_only_a_way_back_to_an_ancestor(self):
+        """A loop is a path that reaches its own ancestor; two links to one shared folder are
+        not a loop."""
+        tree = os.path.join(self.sb.root, "tree")
+        shared = os.path.join(self.sb.root, "shared")
+        os.makedirs(tree)
+        os.makedirs(shared)
+        with open(os.path.join(shared, "note.md"), "w") as f:
+            f.write("x")
+        os.symlink(shared, os.path.join(tree, "one"))
+        os.symlink(shared, os.path.join(tree, "two"))
+        self.assertEqual(A.digest_tree(tree, True)[1], 2)
+        self.assertEqual(sorted(A.tree_files(tree, True)), ["one/note.md", "two/note.md"])
+        os.symlink(tree, os.path.join(shared, "back"))
+        with self.assertRaises(OSError) as e:
+            A.digest_tree(tree, True)
+        self.assertEqual(e.exception.errno, errno.ELOOP)
+
+
+class Review6SourceRoot(support.SandboxCase, unittest.TestCase):
+    """Rule (source roots are trusted as given): a linked [[skill]] path root is resolved before
+    the copy checks, and a link beneath it is still refused."""
+
+    def test_r6_rule_a_linked_loose_root_still_refuses_a_link_beneath_it(self):
+        actual = os.path.join(self.sb.home, "original", "review-note")
+        scenario.write_skill(actual, "review-note")
+        os.symlink(os.path.join(actual, "SKILL.md"), os.path.join(actual, "linked.md"))
+        alias = os.path.join(self.sb.home, "review-note")
+        os.symlink(actual, alias)
+        loose(self.sb, ("review-note", alias))
+        r = self.sb.run("--json")
+        row = find(rows(r)[0], "agy", "review-note")[0]
+        self.assertEqual(row["result"], "failed", r.stdout)
+        self.assertIn("linked.md", row["detail"])
+        self.assertFalse(os.path.lexists(os.path.join(self.sb.agy_skills, "review-note")))
+
+
 if __name__ == "__main__":
     unittest.main()

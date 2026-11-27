@@ -105,13 +105,13 @@ neither checks nor refuses that: those homes are written only by their own CLIs,
 folders in them where the link leads.
 
 **Source roots are trusted as given, too.** A `checkout` or a `[[skill]]` `path` you name in the
-manifest may itself be a symlink, or sit under one; it is the location you chose. The link check
-starts beneath it: a link inside a catalog or a skill folder is still refused, and so is a
-`SKILL.md` or `plugin.json` that is a link. Paths a harness owns and agent-sync only reads are
-read through links: agy's bundled skills, Codex's plugin cache and Claude Code's installed plugin
-folders. When such an inventory cannot be read, what depends on it fails rather than proceeding
-as if it were empty: an agy bundled-skills folder that cannot be read stops every agy copy,
-since any of them could collide with a bundled skill.
+manifest may itself be a symlink, or sit under one; it is the location you chose, and agent-sync
+resolves it before it reads anything. The link check starts beneath it: a link inside a catalog or a
+skill folder is still refused, and so is a `SKILL.md` or `plugin.json` that is a link. Paths a
+harness owns and agent-sync only reads are read through links: agy's bundled skills, Codex's plugin
+cache and Claude Code's installed plugin folders. When such an inventory cannot be read, what
+depends on it fails rather than proceeding as if it were empty: an agy bundled-skills folder that
+cannot be read stops every agy copy, since any of them could collide with a bundled skill.
 
 **Keep the state directory on the home volume.** Every move agent-sync makes is a single rename,
 into or out of the archive under `$XDG_STATE_HOME`. A rename cannot cross volumes, and agent-sync
@@ -393,8 +393,18 @@ copy never counts as identical, so "all remaining identical" passes over it. "Id
 needs both trees actually digested: a copy with a file that cannot be read is equal to nothing. A
 candidate that is a symlink, or holds one at any depth, is listed and never archived by any
 answer, because moving a relative link changes what it points at. So is one with a part that
-cannot be read, such as a private folder at mode `000`: what is unread may be your own. The
-skills CLI's lock file, `~/.agents/.skill-lock.json`, may have an entry for the name. A
+cannot be read, such as a private folder at mode `000`: what is unread may be your own.
+
+The installed tree is a harness's, so cleanup reads it through its links, and a link changes what
+cleanup may do. When the installed tree holds any link, the candidate is never archived
+automatically: `a` passes over it, it is asked about by itself, and an `installed` line names the
+links. When one of those links, or the installed folder itself, resolves into the candidate, the
+plugin depends on the flat copy, and no answer archives it. That is checked again at the move.
+When the installed tree cannot be found and the catalog stands in, the catalog is read without
+following links. A loop is a link that leads back to one of its own ancestors, which makes the tree
+unreadable; two links to one shared folder are not a loop, and both are compared.
+
+The skills CLI's lock file, `~/.agents/.skill-lock.json`, may have an entry for the name. A
 `provenance` line then says so; cleanup reads that file and never writes it.
 
 The copy is read again when you answer. If it changed while the question was open, it is shown
