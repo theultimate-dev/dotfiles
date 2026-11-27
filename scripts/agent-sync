@@ -1038,10 +1038,6 @@ def check_prerequisites(ctx):
         raise PrereqError("git is not on PATH, and %s needs it" % ", ".join(needs_git))
 
 
-def run_cleanup(ctx):
-    raise UsageError("cleanup is not available yet")
-
-
 # ── Sources: checkouts and agent-sync's own Git cache (spec §6) ───────────────────────────────
 
 @dataclass
@@ -1735,8 +1731,8 @@ def codex_plugin(ctx, m, src, cat, e, observed):
                                                        "compared" % version)
     stale = "cache differs from %s at the same version; see \"Codex stale cache\" in " \
             "docs/agent-sync.md" % at
-    if not ctx.args.repair:
-        return ctx.report.add(h, e.id, "stale", stale + "; --repair reinstalls it")
+    if not getattr(ctx.args, "repair", False):
+        return ctx.report.add(h, e.id, "stale", stale)
     if not ctx.apply:
         return planned(ctx, h, e.id, add, stale + "; ")
     r = ctx.runner.run(add)
@@ -1975,7 +1971,199 @@ def report_available(ctx):
                            "in the catalog, not in the manifest")
 
 
-SYNC_STEPS[:] = [sync_claude, sync_codex, report_available, sync_agy]
+# ── Duplicates (spec §7) ──────────────────────────────────────────────────────────────────────
+
+def flat_root(ctx, harness):
+    return ctx.paths.claude_flat if harness == "claude" else ctx.paths.codex_flat
+
+
+def flat_names(root):
+    """Skill folders directly in a flat root; `synced/` (account-synced, D4) is never one."""
+    if not os.path.isdir(root):
+        return []
+    return sorted(n for n in os.listdir(root) if not n.startswith(".") and n != "synced"
+                  and os.path.isdir(os.path.join(root, n)))
+
+
+def report_external(ctx):
+    for h in ("claude", "codex"):
+        if h in ctx.harnesses:
+            root = flat_root(ctx, h)
+            for n in flat_names(root):
+                if n in ctx.manifest.external:
+                    ctx.report.add(h, n, "external", tilde(os.path.join(root, n)))
+
+
+def report_duplicates(ctx):
+    for h in ("claude", "codex"):
+        root, sel = flat_root(ctx, h), ctx.selected.get(h, {})
+        for n in flat_names(root):
+            if n in sel and n not in ctx.manifest.external:
+                ctx.report.add(h, n, "duplicate", "plugin %s and %s; run `agent-sync cleanup`"
+                               % (sel[n][0], tilde(os.path.join(root, n))))
+
+
+SYNC_STEPS[:] = [sync_claude, sync_codex, report_external, report_available, report_duplicates,
+                 sync_agy]
+
+
+# ── Cleanup (spec §9) ─────────────────────────────────────────────────────────────────────────
+
+HARNESS_NAMES = {"claude": "Claude Code", "codex": "Codex"}
+
+
+def compare_trees(copy, plugin):
+    mine, theirs = tree_files(copy), tree_files(plugin)
+    changed = sorted(p for p in mine if p in theirs and mine[p] != theirs[p])
+    only_copy = sorted(set(mine) - set(theirs))
+    only_plugin = sorted(set(theirs) - set(mine))
+    if not (changed or only_copy or only_plugin):
+        return True, "identical to the plugin"
+    parts = []
+    if changed:
+        parts.append(files(len(changed)) + " changed")
+    if only_copy:
+        parts.append("%d only in the copy (%s)" % (len(only_copy), ", ".join(only_copy)))
+    if only_plugin:
+        parts.append("%d only in the plugin (%s)" % (len(only_plugin), ", ".join(only_plugin)))
+    return False, "DIFFERS from the plugin: " + ", ".join(parts)
+
+
+def unified_diff(copy, plugin):
+    mine, theirs = tree_files(copy), tree_files(plugin)
+    out = []
+    for rel in sorted(set(mine) | set(theirs)):
+        a = theirs.get(rel, b"").decode(errors="replace").splitlines(True)
+        b = mine.get(rel, b"").decode(errors="replace").splitlines(True)
+        out += difflib.unified_diff(a, b, "plugin/" + rel, "copy/" + rel)
+    return "".join(out)
+
+
+def cleanup_candidates(ctx):
+    """Observe Claude and Codex read-only, as a dry run does, and match their flat roots."""
+    saved = ctx.report, ctx.dry_run, ctx.apply, ctx.fetch
+    ctx.report, ctx.dry_run, ctx.apply, ctx.fetch = Report(), True, False, False
+    try:
+        sync_claude(ctx)
+        sync_codex(ctx)
+    finally:
+        problems = [r for r in ctx.report.rows if r.result == "failed"]
+        ctx.report, ctx.dry_run, ctx.apply, ctx.fetch = saved
+    out = []
+    for h in ("claude", "codex"):
+        root, sel = flat_root(ctx, h), ctx.selected.get(h, {})
+        for n in flat_names(root):
+            if n in sel and n not in ctx.manifest.external:
+                pid, path, version = sel[n]
+                same, content = compare_trees(os.path.join(root, n), path)
+                out.append({"harness": h, "name": n, "path": os.path.join(root, n),
+                            "plugin": pid, "plugin_path": path, "version": version,
+                            "identical": same, "content": content})
+    return out, problems
+
+
+def run_cleanup(ctx):
+    args = ctx.args
+    if args.restore:
+        return cleanup_restore(ctx, args.restore)
+    cands, problems = cleanup_candidates(ctx)
+    for row in problems:
+        print("warning: %s %s: %s" % (row.harness, row.item, row.detail))
+    unknown = [n for n in args.yes if n not in {c["name"] for c in cands}]
+    if unknown:
+        raise UsageError("not a cleanup candidate: %s" % ", ".join(unknown))
+    with (contextlib.nullcontext() if args.dry_run else Lock(ctx.paths.lock)):
+        return cleanup_session(ctx, cands)
+
+
+def cleanup_session(ctx, cands):
+    args, ts = ctx.args, ctx.ts
+    print("agent-sync %s cleanup · manifest %s\n" % (VERSION, tilde(ctx.manifest.path)))
+    if not cands:
+        print("No flat copy shadows a managed, enabled plugin.")
+    auto = stopped = False
+    archived = []
+    for i, c in enumerate(cands, 1):
+        dest = os.path.join(ctx.paths.archive, ts, c["harness"], c["name"])
+        print("[%d/%d] %s" % (i, len(cands), tilde(c["path"])))
+        print("  shadows    skill %s of plugin %s, installed in %s %s"
+              % (c["name"], c["plugin"], HARNESS_NAMES[c["harness"]], c["version"]))
+        print("  content    " + c["content"])
+        print("  action     move to %s" % tilde(dest))
+        if args.dry_run or stopped:
+            print()
+            continue
+        if args.yes:
+            answer = "y" if c["name"] in args.yes else "n"
+        elif auto and c["identical"]:
+            answer = "y"
+        else:
+            answer = None
+        while answer is None:
+            sys.stdout.write("Archive this copy? [y]es / [n]o / [d]iff / [a]ll remaining "
+                             "identical / [q]uit ")
+            sys.stdout.flush()
+            line = sys.stdin.readline()
+            if not line:
+                print("\nno answer; stopping (non-interactive use needs --yes <name>…)")
+                answer = "q"
+                break
+            answer = {"y": "y", "n": "n", "d": "d", "a": "a", "q": "q"}.get(line.strip()[:1])
+            if answer == "d":
+                print(unified_diff(c["path"], c["plugin_path"]) or "(no differences)")
+                answer = None
+            elif answer == "a":
+                auto = True
+                answer = "y" if c["identical"] else None
+        if answer == "q":
+            stopped = True
+        elif answer == "y":
+            moved = archive_tree(c["path"], dest)
+            ctx.state.data["cleanup"].setdefault(ts, []).append(
+                {"harness": c["harness"], "name": c["name"], "from": c["path"], "to": moved})
+            ctx.state.save()
+            archived.append(c["name"])
+            print("  archived")
+        print()
+    print("Not touched:")
+    synced = os.path.join(ctx.paths.codex_flat, "synced")
+    if os.path.isdir(synced):
+        print("  %s/: %d folders, not touched (account-synced; see D4)"
+              % (tilde(synced), len([n for n in os.listdir(synced) if not n.startswith(".")])))
+    for h in ("claude", "codex"):
+        for n in flat_names(flat_root(ctx, h)):
+            if n in ctx.manifest.external:
+                print("  %s: listed under [external]" % tilde(os.path.join(flat_root(ctx, h), n)))
+    if archived:
+        print("\nArchived %d: %s. The skills CLI's lock entries are left in place, so "
+              "`skills list` will show archived copies as missing." % (len(archived),
+                                                                       ", ".join(archived)))
+        print("Undo: agent-sync cleanup --restore %s" % ts)
+    return EXIT_OK
+
+
+def cleanup_restore(ctx, ts):
+    records = ctx.state.data["cleanup"].get(ts)
+    if not records:
+        raise UsageError("no cleanup run %s in %s" % (ts, tilde(ctx.paths.state)))
+    left = []
+    with Lock(ctx.paths.lock):
+        for rec in records:
+            if os.path.lexists(rec["from"]):
+                print("%s exists again; not restored (the archived copy stays at %s)"
+                      % (tilde(rec["from"]), tilde(rec["to"])))
+                left.append(rec)
+            elif not os.path.isdir(rec["to"]):
+                print("%s is missing from the archive; nothing to restore" % tilde(rec["to"]))
+            else:
+                archive_tree(rec["to"], rec["from"])
+                print("restored %s" % tilde(rec["from"]))
+        if left:
+            ctx.state.data["cleanup"][ts] = left
+        else:
+            del ctx.state.data["cleanup"][ts]
+        ctx.state.save()
+    return EXIT_FAILED if left else EXIT_OK
 
 
 if __name__ == "__main__":

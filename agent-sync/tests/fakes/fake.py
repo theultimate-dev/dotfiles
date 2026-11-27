@@ -12,7 +12,8 @@ Behaviour the tests script goes in $FAKE_STATE/config.json:
     claude    {"held": {plugin_id: {"command": ..., "sha256": ...}},  a declared command
                "update": {plugin_id: new_version},                    update finds a new version
                "fail": {verb: message}}                               that verb fails
-    codex     {"fail": {verb: message}}
+    codex     {"fail": {verb: message},
+               "upgrade_skips": [plugin_id]}                         upgrade leaves its cache
     agy       {"plugins": [...]}                                      `agy plugin list --json`
 """
 
@@ -336,7 +337,8 @@ def codex(argv):
             if tree["sha"] != m.get("sha"):  # an unmoved ref skips snapshot and caches (C3)
                 snapshot(m)
                 for p in st["plugins"]:
-                    if p["marketplaceName"] == m["name"]:
+                    if p["marketplaceName"] == m["name"] and \
+                            p["pluginId"] not in cfg.get("upgrade_skips", []):
                         install(m, p["name"])
                 roots.append(m["root"])
         save(path, st)
