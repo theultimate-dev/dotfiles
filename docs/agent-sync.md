@@ -396,30 +396,38 @@ answer, because moving a relative link changes what it points at. So is one with
 cannot be read, such as a private folder at mode `000`: what is unread may be your own.
 
 The installed tree is a harness's, so cleanup reads it through its links, and a link changes what
-cleanup may do. When the installed tree holds any link, the candidate is never archived
-automatically: `a` passes over it, it is asked about by itself, and an `installed` line names the
-links. When one of those links, or the installed folder itself, resolves into the candidate, the
-plugin depends on the flat copy, and no answer archives it. That is checked again at the move.
-When the installed tree cannot be found and the catalog stands in, the catalog is read without
-following links. A loop is a link that leads back to one of its own ancestors, which makes the tree
-unreadable; two links to one shared folder are not a loop, and both are compared.
+cleanup may do. When the installed tree holds any link, or is itself reached through one at or below
+the plugin's folder, the candidate is never archived automatically: `a` passes over it, it is asked
+about by itself, and an `installed` line names the links. When one of those links, or the installed
+folder itself, resolves into the candidate or to a folder that holds it, the plugin depends on the
+flat copy, and no answer archives it. Both are checked again at the move: a dependency found then
+stops the move, and a link found then voids an answer for all, so the candidate is asked about by
+itself. When the installed tree cannot be found and the catalog stands in, the catalog is read
+without following links. A loop is a link that leads back to one of its own ancestors, which makes
+the tree unreadable; two links to one shared folder are not a loop, and both are compared.
+
+Whether one path is, or lies inside, another is the filesystem's answer, never the spelling's:
+agent-sync compares device and inode along the resolved chain. On macOS's case-insensitive volume,
+`~/.agents/skills/framing-ideas` and `~/.agents/skills/FRAMING-IDEAS` are one folder, and an
+installed link to either spelling is a dependency on the copy. The same comparison decides whether a
+Claude or Codex marketplace already points at your checkout and whether a restore reaches the folder
+a copy was archived from.
 
 The skills CLI's lock file, `~/.agents/.skill-lock.json`, may have an entry for the name. A
 `provenance` line then says so; cleanup reads that file and never writes it.
 
-The copy is read again when you answer. If it changed while the question was open, it is shown
-again and asked about again; with `--yes`, it is not archived and cleanup exits 1. A yes is a
-rename into `archive/<timestamp>/<harness>/<name>`. The state file records it in the same protected
-step, so Ctrl-C cannot leave a moved folder unrecorded. Nothing is deleted, and
-`--restore <timestamp>` puts that run's folders back, each at exactly its old name or not at all.
-Each record keeps the resolved path of the flat folder it came from. When `~/.claude/skills` or
-`~/.agents/skills` now resolves elsewhere, because `CLAUDE_CONFIG_DIR` changed or `~/.claude` is a
-link to another profile, restore refuses that folder. Reach the same profile again, by whatever
-path, and restore it. A name that has since reappeared, even during the restore, whose archived
-folder is gone, or whose profile changed, stays on record; restore reports it and exits 1.
-`--restore` with `--dry-run` shows what it would move and moves nothing. Cleanup logs its own
-listing commands to `last-run.log`, as a run does. It exits 1 if it could not read a harness's
-inventory.
+The copy is read again when you answer. If it changed while the question was open, it is shown again
+and asked about again; with `--yes`, it is not archived and cleanup exits 1. A yes is a rename into
+`archive/<timestamp>/<harness>/<name>`. The state file records it in the same protected step, so
+Ctrl-C cannot leave a moved folder unrecorded. Nothing is deleted, and `--restore <timestamp>` puts
+that run's folders back, each at exactly its old name or not at all. Each record keeps the resolved
+path of the flat folder it came from. When `~/.claude/skills` or `~/.agents/skills` is now a
+different folder, because `CLAUDE_CONFIG_DIR` changed or `~/.claude` is a link to another profile,
+restore refuses that folder. Reach the same profile again, by whatever path, and restore it. A name
+that has since reappeared, even during the restore, whose archived folder is gone, or whose profile
+changed, stays on record; restore reports it and exits 1. `--restore` with `--dry-run` shows what it
+would move and moves nothing. Cleanup logs its own listing commands to `last-run.log`, as a run
+does. It exits 1 if it could not read a harness's inventory.
 
 **`skills list` will show archived copies as missing.** The skills CLI that made those copies
 keeps a lock file of what it installed. That file belongs to that tool, so cleanup does not edit

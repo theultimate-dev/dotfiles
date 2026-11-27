@@ -375,6 +375,38 @@ def tilde(path):
     return path
 
 
+def ident(path):
+    """What the filesystem calls a path, through links: (device, inode). Raises OSError."""
+    st = os.stat(path)
+    return st.st_dev, st.st_ino
+
+
+def same_folder(a, b):
+    """Whether two existing paths are one file or folder, by device and inode, so spelling,
+    case and links cannot make one look like two (spec §10). A missing path is no folder."""
+    try:
+        return bool(a and b) and ident(a) == ident(b)
+    except (FileNotFoundError, NotADirectoryError):
+        return False
+
+
+def lies_in(path, folder):
+    """Whether an existing path is folder or lies inside it: device and inode compared along
+    the resolved path's ancestor chain, never strings (spec §10). A missing path lies nowhere.
+    Raises OSError for any other failure."""
+    try:
+        want, p = ident(folder), os.path.realpath(path)
+        ident(p)
+    except (FileNotFoundError, NotADirectoryError):
+        return False
+    while True:
+        if ident(p) == want:
+            return True
+        if os.path.dirname(p) == p:
+            return False
+        p = os.path.dirname(p)
+
+
 def xdg(var, default):
     value = os.environ.get(var)
     return value if value and os.path.isabs(value) else os.path.join(home(), default)
@@ -698,7 +730,7 @@ def walk(root, follow=False):
     chains = {}
     for d, dirs, names in os.walk(root, onerror=_raise, followlinks=follow):
         if follow:
-            real = os.path.realpath(d)
+            real = ident(d)     # the folder itself, whatever the spelling (spec §10)
             above = chains.get(os.path.dirname(d), ()) if d != root else ()
             if real in above:
                 raise OSError(errno.ELOOP, "a link that leads back to its own ancestor", d)
@@ -1271,7 +1303,15 @@ def normalize_git(value):
 
 
 def same_path(a, b):
-    return bool(a and b) and os.path.realpath(a) == os.path.realpath(b)
+    """A harness's recorded marketplace path against the manifest's: one folder by device and
+    inode when both exist (spec §10). Only two paths that both do not exist are compared by
+    spelling, since nothing else is left to compare; one missing is never a match."""
+    if not (a and b):
+        return False
+    gone = [kind_of(x, True) is None for x in (a, b)]     # any other error raises
+    if all(gone):
+        return os.path.normpath(os.path.abspath(a)) == os.path.normpath(os.path.abspath(b))
+    return not any(gone) and same_folder(a, b)
 
 
 def checkout_source(ctx, path):
@@ -1934,7 +1974,8 @@ def record_selection(ctx, harness, m, cat, enrolled, installed):
                 loaded = os.path.join(root, os.path.relpath(s.path, pdir)) \
                     if isinstance(root, str) else None
                 sel.setdefault(s.name, (e.id, s.path, p.get("version"),
-                                        loaded if loaded and os.path.isdir(loaded) else None))
+                                        loaded if loaded and os.path.isdir(loaded) else None,
+                                        root if isinstance(root, str) else None))
 
 
 # ── Codex (spec §5.2) ─────────────────────────────────────────────────────────────────────────
@@ -2609,20 +2650,29 @@ def blocked(path):
     return None
 
 
-def installed_links(copy, installed):
-    """(links, why): the links in the installed tree a candidate is compared with, relative to
-    it, and why the candidate is blocked, or None. It is blocked when the tree, or a link in it,
-    resolves into the copy, since the plugin then depends on the copy, or when the tree cannot
-    be read in full, so that cannot be ruled out (spec §10, cleanup and links)."""
-    mine, links = os.path.realpath(copy), []
+def installed_links(copy, installed, top=None):
+    """(links, why): the links in the installed tree a candidate is compared with, and why the
+    candidate is blocked, or None. A link inside the tree is named relative to it; the tree
+    itself, or a folder between it and the plugin's root top, is named in full. It is blocked
+    when the tree, or a link in it, resolves into the copy or to a folder holding it, since the
+    plugin then depends on the copy, or when the tree cannot be read in full, so that cannot be
+    ruled out. Is and inside are device and inode, never spelling (spec §10)."""
+    links = []
 
     def into(p):
-        r = os.path.realpath(p)
-        return r == mine or r.startswith(mine + os.sep) or mine.startswith(r + os.sep)
+        return lies_in(p, copy) or lies_in(copy, p)
 
     try:
+        chain, p = [], installed
+        while True:
+            chain.append(p)
+            if not top or p == top or os.path.dirname(p) == p or \
+                    not p.startswith(top.rstrip("/") + "/"):
+                break
+            p = os.path.dirname(p)
+        links += [tilde(x) for x in reversed(chain) if kind_of(x) == "link"]
         if into(installed):
-            return [], "the installed plugin is this copy, reached through a link"
+            return links, "the installed plugin is this copy, reached through a link"
         for d, dirs, names in walk(installed, True):
             for n in dirs + names:
                 if kind_of(os.path.join(d, n)) == "link":
@@ -2664,11 +2714,11 @@ def cleanup_candidates(ctx):
         problems = [r for r in ctx.report.rows if r.result == "failed"]
         ctx.report, ctx.dry_run, ctx.apply, ctx.fetch = saved
     cands = []
-    for h, root, n, (pid, path, version, loaded) in out:
+    for h, root, n, (pid, path, version, loaded, top) in out:
         c = {"harness": h, "name": n, "path": os.path.join(root, n), "plugin": pid,
              "plugin_path": loaded or path, "version": version, "follow": loaded is not None,
-             "digest": snapshot(os.path.join(root, n))}
-        c["links"], depends = installed_links(c["path"], loaded) if loaded else ([], None)
+             "top": top, "digest": snapshot(os.path.join(root, n))}
+        c["links"], depends = installed_links(c["path"], loaded, top) if loaded else ([], None)
         c["blocked"] = blocked(c["path"]) or depends
         c["content"] = c["blocked"] + "; not compared" if c["blocked"] else \
             compare_trees(c["path"], c["plugin_path"], c["follow"])
@@ -2737,46 +2787,22 @@ def cleanup_session(ctx, cands, kept=()):
         if args.dry_run or stopped:
             print()
             continue
-        if args.yes:
-            answer = "y" if c["name"] in args.yes else "n"
-        elif auto and c["identical"] and not c["links"]:
-            answer = "y"
-        else:
-            answer = None
-        while answer is None:
-            sys.stdout.write("Archive this copy? [y]es / [n]o / [d]iff / [a]ll remaining "
-                             "identical / [q]uit ")
-            sys.stdout.flush()
-            line = sys.stdin.readline()
-            if not line:
-                print("\nno answer; stopping (non-interactive use needs --yes <name>…)")
-                answer = "q"
+        while True:
+            answer, automatic = ask(ctx, c, auto)
+            auto = auto or automatic or answer == "a"
+            if answer != "y":
                 break
-            answer = {"y": "y", "n": "n", "d": "d", "a": "a", "q": "q"}.get(line.strip()[:1])
-            if answer == "d":
-                try:
-                    print(unified_diff(c["path"], c["plugin_path"], c["follow"]) or
-                          "(no differences)")
-                except OSError as e:
-                    print("cannot be read: %s" % e)
-                answer = None
-            elif answer == "a":
-                auto = True
-                # A differing copy is kept, and so is one whose installed tree holds links.
-                answer = "y" if c["identical"] and not c["links"] else "n"
-            if answer == "y" and not args.yes:
-                answer = recheck(ctx, c)
-        if answer == "q":
-            stopped = True
-        elif answer == "y":
             try:
-                def unchanged(c=c):     # the whole check again, at the move (spec §10)
+                def unchanged(c=c, automatic=automatic):    # the whole check, at the move (§10)
                     now = snapshot(c["path"])
-                    why = blocked(c["path"]) or c["follow"] and \
-                        installed_links(c["path"], c["plugin_path"])[1]
+                    links, depends = installed_links(c["path"], c["plugin_path"], c["top"]) \
+                        if c["follow"] else ([], None)
+                    why = blocked(c["path"]) or depends
                     if why or now is None or now != c["digest"]:
                         raise TreeError("%s; run cleanup again to see it" % (
                             why or "it changed since it was shown, or cannot be read"))
+                    if automatic and links:
+                        raise AskAlone(links)
 
                 with critical():    # the move and its record are one operation
                     moved = archive_tree(c["path"], dest, "src", unchanged)
@@ -2790,12 +2816,20 @@ def cleanup_session(ctx, cands, kept=()):
                               "--restore will not find it; move it back by hand to undo"
                               % tilde(moved))
                         code = EXIT_FAILED
-                        continue
+                        break
                 archived.append(c["name"])
                 print("  archived")
+            except AskAlone as e:
+                c["links"] = e.links
+                print("  installed  now holds links (%s), so the answer for all does not cover "
+                      "it; it is asked about by itself" % ", ".join(e.links[:5]))
+                continue
             except ITEM_ERRORS as e:
                 print("  not archived: %s" % e)
                 code = EXIT_FAILED
+            break
+        if answer == "q":
+            stopped = True
         print()
     print("Not touched:")
     synced = os.path.join(ctx.paths.codex_flat, "synced")
@@ -2814,6 +2848,52 @@ def cleanup_session(ctx, cands, kept=()):
                                                                        ", ".join(archived)))
         print("Undo: agent-sync cleanup --restore %s" % ts)
     return code
+
+
+class AskAlone(Exception):
+    """An answer for all met links in the installed tree at the move (spec §10)."""
+
+    def __init__(self, links):
+        super().__init__("the installed tree now holds links")
+        self.links = links
+
+
+def ask(ctx, c, auto):
+    """One candidate's answer -> (answer, automatic). The answer is "y", "n", "q", or "a" for
+    a copy that [a]ll passes over; automatic when the yes comes from [a]ll rather than from a
+    look at this candidate, so the move can void it when links appear (spec §10)."""
+    if ctx.args.yes:
+        return ("y" if c["name"] in ctx.args.yes else "n"), False
+    if auto and c["identical"] and not c["links"]:
+        return "y", True
+    while True:
+        sys.stdout.write("Archive this copy? [y]es / [n]o / [d]iff / [a]ll remaining "
+                         "identical / [q]uit ")
+        sys.stdout.flush()
+        line = sys.stdin.readline()
+        if not line:
+            print("\nno answer; stopping (non-interactive use needs --yes <name>…)")
+            return "q", False
+        answer = {"y": "y", "n": "n", "d": "d", "a": "a", "q": "q"}.get(line.strip()[:1])
+        if answer == "d":
+            try:
+                print(unified_diff(c["path"], c["plugin_path"], c["follow"]) or
+                      "(no differences)")
+            except OSError as e:
+                print("cannot be read: %s" % e)
+            continue
+        # A differing copy is kept by [a]ll, and so is one whose installed tree holds links.
+        if answer == "a" and not (c["identical"] and not c["links"]):
+            return "a", False
+        if answer in ("y", "a"):
+            again = recheck(ctx, c)
+            if again == "y":
+                return "y", answer == "a"
+            if again == "n":
+                return ("a" if answer == "a" else "n"), False
+            continue
+        if answer in ("n", "q"):
+            return answer, False
 
 
 def recheck(ctx, c):
@@ -2842,7 +2922,16 @@ def cleanup_restore(ctx, ts):
         back = os.path.join(flat_root(ctx, rec["harness"]), rec["name"])
         held = os.path.join(ctx.paths.archive, ts, rec["harness"], rec["slot"])
         now = os.path.realpath(flat_root(ctx, rec["harness"]))
-        if rec.get("root") != now:      # another profile, by link or by environment (§10)
+        # Another profile, by link or by environment, is another folder: device and inode, so
+        # a second spelling of the recorded root is still that root (spec §10).
+        try:
+            same, why = same_folder(rec.get("root"), flat_root(ctx, rec["harness"])), None
+        except OSError as e:
+            same, why = None, e
+        if why:
+            print("%s cannot be inspected (%s); not restored (the archived copy stays at %s)"
+                  % (tilde(flat_root(ctx, rec["harness"])), why, tilde(held)))
+        elif not same:
             print("%s now resolves to %s, not to %s it was archived from; not restored (the "
                   "archived copy stays at %s)" % (tilde(flat_root(ctx, rec["harness"])),
                                                   tilde(now), tilde(rec.get("root") or

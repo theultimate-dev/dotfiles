@@ -2219,5 +2219,184 @@ class Review6SourceRoot(support.SandboxCase, unittest.TestCase):
         self.assertFalse(os.path.lexists(os.path.join(self.sb.agy_skills, "review-note")))
 
 
+
+# ── Review 7 (1736140): each probe case, then a test of "Two paths are the same folder when the
+# filesystem says so" at each place the bullet names (§10) ─────────────────────────────────────
+
+
+def case_blind(test):
+    """Skip unless the temporary volume folds case, where one folder has two spellings."""
+    with test.sb.active():
+        if not A.case_insensitive(test.sb.root):
+            test.skipTest("the temporary volume is case-sensitive")
+
+
+def upper_leaf(path):
+    return os.path.join(os.path.dirname(path), os.path.basename(path).upper())
+
+
+def codex_cache_skill(test, name="framing-ideas"):
+    return os.path.join(test.sb.codex_home, "plugins", "cache", "example-skills", "planning",
+                        "0.4.0", "skills", name)
+
+
+class SwapOnRead:
+    """stdin whose first readline runs change(), and then answers in turn."""
+
+    def __init__(self, change, *answers):
+        self.change, self.answers = change, list(answers)
+
+    def readline(self):
+        if self.change:
+            self.change()
+            self.change = None
+        return self.answers.pop(0) if self.answers else ""
+
+
+class Review7Probes(support.SandboxCase, unittest.TestCase):
+    """The probe-7 cases, with the expected behaviour."""
+
+    def test_r7_b1_an_installed_root_linked_to_another_spelling_of_the_copy_is_kept(self):
+        for answer in ("a", "y", "--yes"):
+            with self.subTest(answer=answer):
+                self.sb.close()
+                self.sb = support.Sandbox()
+                case_blind(self)
+                cache, flat = codex_flat(self, "framing-ideas")
+                skill = os.path.join(cache, "framing-ideas")
+                shutil.rmtree(skill)
+                os.symlink(upper_leaf(os.path.join(flat, "framing-ideas")), skill)
+                r = self.sb.run("cleanup", "--yes", "framing-ideas") if answer == "--yes" \
+                    else self.sb.run("cleanup", input=answer + "\n")
+                self.assertTrue(os.path.isdir(os.path.join(flat, "framing-ideas")), r.stdout)
+                self.assertTrue(os.path.isfile(os.path.join(skill, "SKILL.md")))
+                self.assertIn("the installed plugin is this copy", r.stdout)
+                self.assertIn("holds links (~/.codex/", r.stdout, "the root link is named")
+                self.assertEqual(read_state(self.sb)["cleanup"], {})
+        self.addCleanup(lambda: self.sb.close())
+
+    def test_r7_sf1_a_link_found_at_the_move_voids_an_answer_for_all(self):
+        cache, flat = codex_flat(self, "framing-ideas")
+        marker = os.path.join(cache, "framing-ideas", "SKILL.md")
+        independent = elsewhere(self, marker, "SKILL.md")
+        for second, kept in (("n\n", True), ("y\n", False)):
+            with self.subTest(then=second):
+                code, out, _ = captured(self.sb, ["cleanup"], stdin=SwapOnRead(
+                    lambda: relink(marker, independent), "a\n", second))
+                self.assertIn("now holds links (SKILL.md)", out)
+                self.assertIn("asked about by itself", out)
+                self.assertEqual(out.count("Archive this copy?"), 2, out)
+                self.assertEqual(os.path.isdir(os.path.join(flat, "framing-ideas")), kept, out)
+                self.assertTrue(os.path.isfile(marker))
+                if kept:    # the same machine, ready for the second round
+                    os.remove(marker)
+                    shutil.copy(independent, marker)
+
+
+class Review7Identity(support.SandboxCase, unittest.TestCase):
+    """Rule: wherever agent-sync asks whether one path is, or lies inside, another, it compares
+    device and inode along the chain, never strings (spec §10)."""
+
+    def test_r7_rule_is_and_inside_are_the_filesystem_s_answer(self):
+        tree = os.path.join(self.sb.root, "tree")
+        os.makedirs(os.path.join(tree, "inner"))
+        os.makedirs(os.path.join(self.sb.root, "sibling"))
+        alias = os.path.join(self.sb.root, "alias")
+        os.symlink(tree, alias)
+        inner = os.path.join(alias, "inner")
+        self.assertTrue(A.same_folder(alias, tree))
+        self.assertTrue(A.lies_in(inner, tree) and A.lies_in(tree, alias))
+        self.assertFalse(A.lies_in(tree, inner))
+        self.assertFalse(A.lies_in(os.path.join(self.sb.root, "sibling"), tree))
+        self.assertFalse(A.lies_in(os.path.join(tree, "absent"), tree), "a missing path")
+        self.assertFalse(A.same_folder(os.path.join(tree, "absent"), tree))
+        with self.sb.active():
+            folds = A.case_insensitive(self.sb.root)
+        if folds:
+            self.assertTrue(A.same_folder(upper_leaf(tree), tree))
+            self.assertTrue(A.lies_in(os.path.join(upper_leaf(tree), "INNER"), tree))
+
+    def test_r7_rule_a_loop_is_an_ancestor_by_identity(self):
+        case_blind(self)
+        tree = os.path.join(self.sb.root, "tree")
+        os.makedirs(os.path.join(tree, "sub"))
+        os.symlink(upper_leaf(tree), os.path.join(tree, "sub", "back"))
+        with self.assertRaises(OSError) as e:
+            A.digest_tree(tree, True)
+        self.assertEqual(e.exception.errno, errno.ELOOP)
+        self.assertIn("its own ancestor", str(e.exception))
+
+    def test_r7_rule_the_dependency_guard_sees_through_spelling(self):
+        case_blind(self)
+        cache, flat = codex_flat(self, "framing-ideas")
+        references = os.path.join(cache, "framing-ideas", "references")
+        relink(references, os.path.join(upper_leaf(flat), "framing-ideas", "references"))
+        r = self.sb.run("cleanup", input="y\n")
+        self.assertTrue(os.path.isdir(os.path.join(flat, "framing-ideas")), r.stdout)
+        self.assertIn("link references resolves into it", r.stdout)
+
+    def test_r7_rule_a_link_at_or_above_the_installed_root_is_a_link_in_the_tree(self):
+        """[a]ll at the first candidate passes over every one whose installed tree is reached
+        through a link, and each such candidate is asked about by itself."""
+        for where, archived in (("the skill folder", ["framing-ideas"]),
+                                ("its skills folder", [])):
+            with self.subTest(link=where):
+                self.sb.close()
+                self.sb = support.Sandbox()
+                cache, flat = codex_flat(self, "framing-ideas", "shaping-briefs")
+                target = os.path.join(cache, "shaping-briefs") \
+                    if where == "the skill folder" else cache
+                relink(target, elsewhere(self, target, os.path.basename(target)))
+                r = self.sb.run("cleanup", input="a\nn\n")
+                self.assertIn("holds links (%s)" % A.tilde(target).replace(self.sb.home, "~"),
+                              r.stdout)
+                self.assertIn("identical to the plugin", r.stdout)
+                self.assertEqual(r.stdout.count("Archive this copy?"), 2, r.stdout)
+                self.assertEqual(sorted(n for n in ("framing-ideas", "shaping-briefs")
+                                        if not os.path.exists(os.path.join(flat, n))),
+                                 archived, r.stdout)
+        self.addCleanup(lambda: self.sb.close())
+
+    def test_r7_rule_the_restore_root_is_the_same_folder_in_another_spelling(self):
+        case_blind(self)
+        flat = claude_flat_copy(self)
+        ts, held = archive_flat(self, flat)
+        doc = read_state(self.sb)
+        doc["cleanup"][ts][0]["root"] = upper_leaf(doc["cleanup"][ts][0]["root"])
+        write_state(self.sb, doc)
+        r = self.sb.run("cleanup", "--restore", ts)
+        self.assertEqual(r.returncode, 0, r.stdout)
+        self.assertTrue(os.path.isfile(os.path.join(flat, "SKILL.md")))
+        self.assertFalse(os.path.lexists(held))
+
+    @unittest.skipIf(os.geteuid() == 0, ROOT_ONLY)
+    def test_r7_rule_a_restore_root_that_cannot_be_inspected_is_reported_not_fatal(self):
+        flat = claude_flat_copy(self)
+        ts, held = archive_flat(self, flat)
+        with locked(self.sb.claude_home):
+            r = self.sb.run("cleanup", "--restore", ts)
+        self.assertNotIn("Traceback", r.stderr)
+        self.assertIn("cannot be inspected", r.stdout)
+        self.assertEqual(r.returncode, 1)
+        self.assertTrue(os.path.isdir(held))
+        self.assertIn(ts, read_state(self.sb)["cleanup"])
+
+    def test_r7_rule_a_marketplace_is_owned_by_folder_not_spelling(self):
+        case_blind(self)
+        checkout = scenario.setup(self.sb, harnesses='["claude"]')
+        self.assertEqual(self.sb.run().returncode, 0)
+        path = os.path.join(self.sb.claude_home, "fake-state.json")
+        with open(path) as f:
+            st = json.load(f)
+        entry = next(m for m in st["marketplaces"] if m.get("path") == checkout)
+        entry["path"] = entry["installLocation"] = upper_leaf(checkout)
+        with open(path, "w") as f:
+            json.dump(st, f)
+        self.sb.clear_calls()
+        r = self.sb.run("--check", "--json")
+        self.assertFalse(find(rows(r)[0], "claude", None, "source-mismatch"), r.stdout)
+        self.assertFalse([a for a in self.sb.argvs("claude") if a[1:3] == ["marketplace", "add"]])
+
+
 if __name__ == "__main__":
     unittest.main()
