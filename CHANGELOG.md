@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `python@3.13` in the `Brewfile`, so `python3` is a current Python: agent-sync needs 3.11 or
+  newer for `tomllib`, and the Herdr agent hooks do nothing when `python3` is missing.
+  **Upgrade steps:** run `./setup.sh` to install it.
+
 ### Removed
 
 - Zed and GitHub Copilot CLI. Their casks, and the `font-symbols-only-nerd-font` cask that only
