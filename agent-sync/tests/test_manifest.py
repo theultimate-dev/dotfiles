@@ -216,7 +216,7 @@ class FromTheCommandLine(support.SandboxCase, unittest.TestCase):
             self.sb.manifest(f.read())
         r = self.sb.run("--dry-run")  # claude and agy read ~/src/example-skills
         self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
-        self.assertIn("checkout ~/src/example-skills does not exist (used by claude)", r.stderr)
+        self.assertIn("checkout ~/src/example-skills does not exist or cannot be read (used by claude)", r.stderr)
         self.assertIn("skill my-local-skill: path ~/src/my-skills/my-local-skill does not exist",
                       r.stderr)
         self.assertEqual(self.sb.calls(), [])

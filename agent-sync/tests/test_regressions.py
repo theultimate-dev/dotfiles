@@ -1435,5 +1435,382 @@ class Review3UnappliedRevision(support.SandboxCase, unittest.TestCase):
         self.assertEqual(self.sb.run("--check").returncode, 0)
 
 
+
+# ── Review 4 (a556c36): each probe case, then a test of the class rule it falls under (§10) ────
+
+
+@contextlib.contextmanager
+def locked(*paths):
+    """Each path at mode 0 for the block, as a permission-denied part of a tree leaves it."""
+    modes = [(p, os.stat(p).st_mode & 0o7777) for p in paths]
+    for p, _ in modes:
+        os.chmod(p, 0)
+    try:
+        yield
+    finally:
+        for p, mode in modes:
+            os.chmod(p, mode)
+
+
+def codex_checkout(test):
+    """Codex installing the example catalog from its checkout, applied once -> the checkout."""
+    checkout = scenario.setup(test.sb, harnesses='["codex"]')
+    edit_manifest(test.sb, 'codex     = "git"\nagy', 'codex     = "checkout"\nagy')
+    test.assertEqual(test.sb.run().returncode, 0)
+    return checkout
+
+
+def edit_manifest(sb, old, new):
+    path = os.path.join(sb.config_home, "agent-sync", "manifest.toml")
+    with open(path) as f:
+        text = f.read()
+    assert old in text, old
+    sb.manifest(text.replace(old, new, 1))
+
+
+def adds_of(sb, source):
+    return [a for a in sb.argvs("claude")
+            if a[:3] == ["plugin", "marketplace", "add"] and a[-1].startswith(source)]
+
+
+ALTERNATE_GIT = ('[[marketplace]]\nname = "vendor-alternate"\ngit = "%s"\nref = "v2.3.0"\n'
+                 'claude = "git"\nharnesses = ["claude"]\nplugins = "all"\n' % scenario.VURL)
+ALTERNATE_CHECKOUT = ('[[marketplace]]\nname = "skills-alternate"\ncheckout = '
+                      '"~/src/example-skills"\nclaude = "checkout"\nharnesses = ["claude"]\n'
+                      'plugins = "all"\n')
+ROOT_ONLY = "permission bits do not bind root"
+
+
+def stage_on_other_volume(sb, live):
+    """_rename that fails with EXDEV only for the staged copy going live."""
+    real = A._rename
+
+    def rename(a, b):
+        if b == live and ".agent-sync-stage" in a.split(os.sep):
+            raise OSError(errno.EXDEV, "Cross-device link", a, None, b)
+        return real(a, b)
+    return [("_rename", rename)]
+
+
+@unittest.skipIf(os.geteuid() == 0, ROOT_ONLY)
+class Review4Probes(support.SandboxCase, unittest.TestCase):
+    """The probe-4 cases, with the expected behaviour."""
+
+    def test_r4_b1_a_second_name_for_one_fetched_catalog_fails_before_its_add(self):
+        scenario.setup(self.sb, harnesses='["claude"]', extra=ALTERNATE_GIT)
+        r = self.sb.run("--json")
+        self.assertEqual(len(adds_of(self.sb, scenario.VURL)), 1, r.stdout)
+        row = find(rows(r)[0], "claude", "marketplace vendor-alternate")[0]
+        self.assertEqual(row["result"], "failed")
+        self.assertIn("named example-vendor-plugins, not vendor-alternate", row["detail"])
+        self.assertEqual(r.returncode, 1)
+
+    def test_r4_b2_an_unreadable_selected_skill_is_never_pruned(self):
+        checkout = scenario.setup(self.sb, harnesses='["agy"]')
+        self.assertEqual(self.sb.run().returncode, 0)
+        with locked(os.path.join(checkout, "plugins", "planning", "skills", "framing-ideas")):
+            r = self.sb.run("--prune", "--json")
+        got, _ = rows(r)
+        self.assertTrue(os.path.isdir(os.path.join(self.sb.agy_skills, "framing-ideas")))
+        self.assertIn("framing-ideas", read_state(self.sb)["agy"])
+        self.assertEqual(find(got, "agy", "planning/framing-ideas")[0]["result"], "failed")
+        self.assertEqual(len(find(got, "agy", "prune", "skipped")), 1, r.stdout)
+        self.assertEqual(find(got, "agy", "planning/shaping-briefs")[0]["result"], "unchanged")
+        self.assertEqual(r.returncode, 1)
+
+    def test_r4_b2_an_unreadable_loose_skill_keeps_prune_closed(self):
+        retired = os.path.join(self.sb.home, "src", "retired")
+        scenario.write_skill(retired, "retired")
+        loose(self.sb, ("retired", retired))
+        self.assertEqual(self.sb.run().returncode, 0)
+        upcoming = os.path.join(self.sb.home, "src", "next-skill")
+        scenario.write_skill(upcoming, "next-skill")
+        loose(self.sb, ("next-skill", upcoming))
+        with locked(os.path.join(upcoming, "SKILL.md")):
+            r = self.sb.run("--prune", "--json")
+        got, _ = rows(r)
+        self.assertEqual(find(got, "agy", "next-skill")[0]["result"], "failed")
+        self.assertTrue(os.path.isdir(os.path.join(self.sb.agy_skills, "retired")))
+        self.assertTrue(find(got, "agy", "prune", "skipped"), r.stdout)
+
+    def test_r4_b3_a_linked_descriptor_fails_its_plugin_before_its_selection_is_read(self):
+        checkout = scenario.setup(self.sb, harnesses='["agy"]')
+        edit_manifest(self.sb, 'agy_skills = ["reviewing-code-changes"]\n', "")
+        descriptor = os.path.join(checkout, "plugins", "reviewing", ".claude-plugin",
+                                  "plugin.json")
+        with open(descriptor) as f:
+            doc = json.load(f)
+        doc["skills"] = ["./skills/draft-notes"]
+        outside = os.path.join(self.sb.home, "other-descriptor.json")
+        with open(outside, "w") as f:
+            json.dump(doc, f)
+        os.remove(descriptor)
+        os.symlink(outside, descriptor)
+        r = self.sb.run("--json")
+        got, _ = rows(r)
+        self.assertFalse(os.path.lexists(os.path.join(self.sb.agy_skills, "draft-notes")))
+        row = find(got, "agy", "reviewing@example-skills")[0]
+        self.assertEqual(row["result"], "failed")
+        self.assertIn("symlink", row["detail"])
+        self.assertEqual(find(got, "agy", "planning/framing-ideas")[0]["result"], "copied")
+
+    def test_r4_b4_an_unreadable_part_keeps_a_copy_from_ever_being_identical(self):
+        flat = claude_flat_copy(self)
+        private = os.path.join(flat, "private")
+        os.mkdir(private)
+        with open(os.path.join(private, "draft.md"), "w") as f:
+            f.write("my customisation")
+        with locked(private):
+            r = self.sb.run("cleanup", input="a\n")
+        self.assertTrue(os.path.isfile(os.path.join(private, "draft.md")), r.stdout)
+        self.assertNotIn("identical to the plugin", r.stdout)
+        self.assertIn("cannot be read in full", r.stdout)
+
+    def test_r4_b5_restore_refuses_another_profile_and_keeps_the_archive(self):
+        claude_flat_copy(self)
+        home = self.sb.claude_home
+        first = os.path.join(self.sb.home, "first-profile")
+        second = os.path.join(self.sb.home, "second-profile")
+        os.rename(home, first)
+        os.symlink(first, home)
+        ts, held = archive_flat(self, os.path.join(home, "skills", "deploying-apps"))
+        os.remove(home)
+        os.mkdir(second)
+        os.symlink(second, home)
+        r = self.sb.run("cleanup", "--restore", ts)
+        self.assertEqual(r.returncode, 1, r.stdout)
+        self.assertIn("first-profile", r.stdout)
+        self.assertTrue(os.path.isdir(held))
+        self.assertFalse(os.path.lexists(os.path.join(second, "skills", "deploying-apps")))
+        self.assertIn(ts, read_state(self.sb)["cleanup"])
+        os.remove(home)
+        os.symlink(first, home)
+        self.assertEqual(self.sb.run("cleanup", "--restore", ts).returncode, 0)
+        self.assertTrue(os.path.isdir(os.path.join(first, "skills", "deploying-apps")))
+
+    def test_r4_sf2_a_missing_cache_skill_is_stale_despite_an_unreadable_source_file(self):
+        checkout = codex_checkout(self)
+        resource = os.path.join(checkout, "plugins", "planning", "skills", "framing-ideas",
+                                "private.md")
+        with open(resource, "w") as f:
+            f.write("source resource")
+        shutil.rmtree(os.path.join(self.sb.codex_home, "plugins", "cache", "example-skills",
+                                   "planning", "0.4.0", "skills", "framing-ideas"))
+        with locked(resource):
+            r = self.sb.run("--check", "--json")
+        self.assertEqual(find(rows(r)[0], "codex", "planning@example-skills")[0]["result"],
+                         "stale", r.stdout)
+
+    def test_r4_sf3_a_stage_across_volumes_names_both_paths_and_the_rule(self):
+        src = os.path.join(self.sb.home, "src", "review-note")
+        live = os.path.join(self.sb.agy_skills, "review-note")
+        scenario.write_skill(src, "review-note", "old body")
+        loose(self.sb, ("review-note", src))
+        self.assertEqual(self.sb.run().returncode, 0)
+        with open(os.path.join(self.sb.state_dir, "state.json"), "rb") as f:
+            before = f.read()
+        scenario.write_skill(src, "review-note", "new body")
+        code, out, _ = captured(self.sb, ["--json"], patches=stage_on_other_volume(self.sb, live))
+        self.assertEqual(code, 1, out)
+        detail = find(rows(subprocess.CompletedProcess([], 0, out))[0], "agy",
+                      "review-note")[0]["detail"]
+        for words in ("different volumes", "agent-sync-stage", "~/.gemini/config/skills/review-"
+                      "note", "staging folder", "previous copy is restored"):
+            self.assertIn(words, detail)
+        with open(os.path.join(live, "SKILL.md")) as f:
+            self.assertIn("old body", f.read())
+        with open(os.path.join(self.sb.state_dir, "state.json"), "rb") as f:
+            self.assertEqual(f.read(), before)
+
+    def test_r4_sf1_a_linked_xdg_base_is_trusted_and_a_link_beneath_it_is_not(self):
+        self.sb.manifest('version = 1\nharnesses = ["agy"]\n')
+        target = os.path.join(self.sb.root, "other-state")
+        alias = os.path.join(self.sb.root, "linked-state")
+        os.mkdir(target)
+        os.symlink(target, alias)
+        env = dict(self.sb.env(), XDG_STATE_HOME=alias)
+        self.sb.env = lambda: env
+        self.assertEqual(self.sb.run("--json").returncode, 0)
+        self.assertTrue(os.path.isfile(os.path.join(target, "agent-sync", "last-run.log")))
+        elsewhere = os.path.join(self.sb.root, "elsewhere")
+        os.mkdir(elsewhere)
+        shutil.rmtree(os.path.join(target, "agent-sync"))
+        os.symlink(elsewhere, os.path.join(target, "agent-sync"))
+        self.assertNotEqual(self.sb.run("--json").returncode, 0)
+        self.assertEqual(os.listdir(elsewhere), [])
+
+
+@unittest.skipIf(os.geteuid() == 0, ROOT_ONLY)
+class Review4ErrorIsNeverAbsence(support.SandboxCase, unittest.TestCase):
+    """Rule: a filesystem error while walking, listing or reading makes the result unavailable:
+    no digest from the readable part, no skill "gone", and a resolution error for prune."""
+
+    def test_r4_rule_the_tree_readers_raise_where_a_part_cannot_be_read(self):
+        tree = os.path.join(self.sb.root, "tree")
+        scenario.write_skill(os.path.join(tree, "one"), "one")
+        os.makedirs(os.path.join(tree, "one", "inner"))
+        with open(os.path.join(tree, "one", "inner", "note.md"), "w") as f:
+            f.write("x")
+        with locked(os.path.join(tree, "one", "inner")):
+            for reader in (A.digest_tree, A.tree_files, A.skill_dirs):
+                with self.subTest(reader=reader.__name__):
+                    self.assertRaises(OSError, reader, tree)
+            self.assertIsNone(A.snapshot(tree))
+            self.assertIn("cannot be read in full", A.blocked(tree))
+            self.assertRaises(PermissionError, A.kind_of,
+                              os.path.join(tree, "one", "inner", "note.md"))
+        with locked(tree):
+            self.assertRaises(PermissionError, A.flat_names, tree)
+            self.assertRaises(PermissionError, A.case_insensitive,
+                              os.path.join(tree, "not-yet", "skills"))
+        self.assertIsNone(A.kind_of(os.path.join(tree, "absent")))
+        self.assertEqual(A.flat_names(os.path.join(tree, "absent")), [])
+
+    def test_r4_rule_every_unreadable_part_of_a_selection_skips_prune_and_keeps_siblings(self):
+        def parts(checkout):
+            planning = os.path.join(checkout, "plugins", "planning")
+            docs = os.path.join(checkout, "docs")
+            os.makedirs(docs, exist_ok=True)
+            return {
+                "a selected skill folder": os.path.join(planning, "skills", "framing-ideas"),
+                "a selected SKILL.md": os.path.join(planning, "skills", "framing-ideas",
+                                                    "SKILL.md"),
+                "a file inside a selected skill": os.path.join(
+                    planning, "skills", "framing-ideas", "templates", "note.md"),
+                "a plugin's skills listing": os.path.join(planning, "skills"),
+                "a plugin.json": os.path.join(planning, ".claude-plugin", "plugin.json"),
+                "a folder of the catalog that holds no skill": docs,
+            }
+        for name in sorted(parts(self.sb.root)):
+            with self.subTest(part=name):
+                self.sb.close()
+                self.sb = support.Sandbox()
+                checkout = agy_with_loose(self.sb)
+                drop_loose(self.sb)
+                with locked(parts(checkout)[name]):
+                    r = self.sb.run("--prune", "--json")
+                got, _ = rows(r)
+                self.assertTrue(os.path.isfile(os.path.join(self.sb.agy_skills, "review-note",
+                                                            "SKILL.md")), r.stdout)
+                self.assertIn("review-note", read_state(self.sb)["agy"])
+                self.assertIn("framing-ideas", read_state(self.sb)["agy"])
+                self.assertEqual(len(find(got, "agy", "prune", "skipped")), 1, r.stdout)
+                self.assertEqual(find(got, "agy", "reviewing/reviewing-code-changes")[0]
+                                 ["result"], "unchanged", "siblings still sync")
+                self.assertEqual(r.returncode, 1)
+        self.addCleanup(lambda: self.sb.close())
+
+    def test_r4_rule_an_unreadable_codex_cache_decides_nothing(self):
+        codex_checkout(self)
+        cached = os.path.join(self.sb.codex_home, "plugins", "cache", "example-skills",
+                              "planning", "0.4.0", "skills", "framing-ideas", "SKILL.md")
+        with locked(cached):
+            r = self.sb.run("--check", "--json")
+        self.assertEqual(find(rows(r)[0], "codex", "planning@example-skills")[0]["result"],
+                         "unverifiable", r.stdout)
+
+    def test_r4_rule_an_unreadable_flat_root_is_a_failure_not_an_empty_folder(self):
+        claude_flat_copy(self)
+        with locked(os.path.join(self.sb.claude_home, "skills")):
+            r = self.sb.run("--json")
+            c = self.sb.run("cleanup", "--dry-run")
+        self.assertEqual(find(rows(r)[0], "claude", "flat skills")[0]["result"], "failed")
+        self.assertEqual(r.returncode, 1, r.stdout)
+        self.assertEqual(c.returncode, 1, c.stdout)
+        self.assertIn("cannot be read", c.stdout)
+
+    def test_r4_rule_no_walk_in_the_script_swallows_an_error(self):
+        with open(support.SCRIPT) as f:
+            text = f.read()
+        walks = [line for line in text.splitlines() if "os.walk(" in line]
+        self.assertTrue(walks and all("onerror=" in line for line in walks), walks)
+        for probe in ("os.path.isfile(", "os.path.exists("):
+            self.assertNotIn(probe, text)
+
+
+class Review4DeclarationLinks(support.SandboxCase, unittest.TestCase):
+    """Rule: marketplace.json, plugin.json and SKILL.md are opened only after their own chain
+    passed the symlink check; a linked one fails its item before anything it says is used."""
+
+    def test_r4_rule_a_declaration_reached_through_a_link_is_never_read(self):
+        def link_in_place(path):
+            os.rename(path, path + ".real")
+            os.symlink(os.path.basename(path) + ".real", path)
+
+        planning = ("plugins", "planning")
+        cases = {
+            "marketplace.json": ((".claude-plugin", "marketplace.json"),
+                                 "marketplace example-skills", None),
+            "a plugin's .claude-plugin folder": (planning + (".claude-plugin",),
+                                                 "planning@example-skills",
+                                                 "reviewing/reviewing-code-changes"),
+            "a plugin.json": (planning + (".claude-plugin", "plugin.json"),
+                              "planning@example-skills", "reviewing/reviewing-code-changes"),
+            "a SKILL.md": (planning + ("skills", "framing-ideas", "SKILL.md"),
+                           "planning/framing-ideas", "planning/shaping-briefs"),
+        }
+        for name, (rel, item, sibling) in sorted(cases.items()):
+            with self.subTest(declaration=name):
+                self.sb.close()
+                self.sb = support.Sandbox()
+                checkout = scenario.setup(self.sb, harnesses='["agy"]')
+                link_in_place(os.path.join(checkout, *rel))
+                r = self.sb.run("--json")
+                got, _ = rows(r)
+                self.assertEqual(find(got, "agy", item)[0]["result"], "failed", r.stdout)
+                self.assertFalse(os.path.lexists(os.path.join(self.sb.agy_skills,
+                                                              "framing-ideas")))
+                if sibling:
+                    self.assertEqual(find(got, "agy", sibling)[0]["result"], "copied")
+        self.addCleanup(lambda: self.sb.close())
+
+
+class Review4EachEntryValidated(support.SandboxCase, unittest.TestCase):
+    """Rule: each manifest marketplace is checked against its catalog by itself, however its
+    tree is shared with another entry, and before any harness command for it."""
+
+    def test_r4_rule_a_shared_tree_never_lends_its_name_check(self):
+        cases = {"git": (ALTERNATE_GIT, scenario.VURL, "vendor-alternate",
+                         "example-vendor-plugins"),
+                 "checkout": (ALTERNATE_CHECKOUT, None, "skills-alternate", "example-skills")}
+        for kind, (extra, source, name, real) in sorted(cases.items()):
+            with self.subTest(source=kind):
+                self.sb.close()
+                self.sb = support.Sandbox()
+                checkout = scenario.setup(self.sb, harnesses='["claude"]', extra=extra)
+                r = self.sb.run("--json")
+                self.assertEqual(len(adds_of(self.sb, source or checkout)), 1, r.stdout)
+                row = find(rows(r)[0], "claude", "marketplace " + name)[0]
+                self.assertEqual(row["result"], "failed")
+                self.assertIn("named %s, not %s" % (real, name), row["detail"])
+                self.assertFalse([a for a in self.sb.argvs("claude") if name in a])
+        self.addCleanup(lambda: self.sb.close())
+
+
+class Review4RestoreRoot(support.SandboxCase, unittest.TestCase):
+    """Rule: a cleanup record remembers the resolved flat root it came from, and restore
+    refuses, keeping the archive and the record, when the current root resolves elsewhere."""
+
+    def test_r4_rule_restore_follows_the_resolved_root_not_the_spelling(self):
+        flat = claude_flat_copy(self)
+        ts, held = archive_flat(self, flat)
+        rec = read_state(self.sb)["cleanup"][ts][0]
+        self.assertEqual(rec["root"], os.path.realpath(os.path.join(self.sb.claude_home,
+                                                                    "skills")))
+        other = os.path.join(self.sb.home, "other-profile")
+        os.makedirs(os.path.join(other, "skills"))
+        alias = os.path.join(self.sb.home, "profile-alias")
+        os.symlink(self.sb.claude_home, alias)
+        base = self.sb.env()
+        for config_dir, code in ((other, 1), (alias, 0)):
+            self.sb.env = lambda: dict(base, CLAUDE_CONFIG_DIR=config_dir)
+            r = self.sb.run("cleanup", "--restore", ts)
+            self.assertEqual(r.returncode, code, r.stdout)
+            self.assertEqual(os.path.isdir(held), code == 1)
+            self.assertEqual(ts in read_state(self.sb)["cleanup"], code == 1)
+        self.assertFalse(os.path.lexists(os.path.join(other, "skills", "deploying-apps")))
+        self.assertTrue(os.path.isfile(os.path.join(flat, "SKILL.md")))
+
+
 if __name__ == "__main__":
     unittest.main()

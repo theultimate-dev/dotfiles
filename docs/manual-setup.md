@@ -377,18 +377,25 @@ item whose archive is on another volume fails with nothing moved. A `scripts/` e
 still planned, so every command below calls the script by its path.
 
 **Do this.** First, the manifest. It is yours, untracked, and starts as a copy of the commented
-example; the copy refuses to overwrite one that is already there:
+example. The copy goes where the script looks: `$XDG_CONFIG_HOME/agent-sync/` when that variable
+holds an absolute path, else `~/.config/agent-sync/`. It refuses to overwrite a manifest that is
+already there, or a link in its place, even a dangling one:
 
 ```sh
-mkdir -p ~/.config/agent-sync
-if [ -e ~/.config/agent-sync/manifest.toml ]; then
-  echo "kept: ~/.config/agent-sync/manifest.toml exists; edit it instead"
+case "$XDG_CONFIG_HOME" in
+  /*) dir="$XDG_CONFIG_HOME/agent-sync" ;;
+  *)  dir="$HOME/.config/agent-sync" ;;
+esac
+mkdir -p "$dir"
+if [ -e "$dir/manifest.toml" ] || [ -L "$dir/manifest.toml" ]; then
+  echo "kept: $dir/manifest.toml exists or is a link; edit or remove it instead"
 else
-  cp <repo>/agent-sync/manifest.example.toml ~/.config/agent-sync/manifest.toml
+  cp <repo>/agent-sync/manifest.example.toml "$dir/manifest.toml"
 fi
+echo "manifest: $dir/manifest.toml"
 ```
 
-Edit `~/.config/agent-sync/manifest.toml`: name your marketplaces, their Git sources and the paths
+Edit the manifest the last line names: your marketplaces, their Git sources and the paths
 of your checkouts, and the plugins you want. The comments in it explain every key. Then look
 before anything changes, and read the whole report:
 
@@ -396,8 +403,10 @@ before anything changes, and read the whole report:
 <repo>/scripts/agent-sync --dry-run
 ```
 
-Nothing is written and nothing is fetched. Each `unchecked` row shows the exact command a run
-would execute. When the plan is what you meant, run it:
+Nothing is written and nothing is fetched. Each `unchecked` row says what a run would do: the
+exact command for a harness change, the copy it would make for agy, or that a catalog is not
+fetched yet, in which case its plugins are listed once a run or `--check` has fetched it. When the
+plan is what you meant, run it:
 
 ```sh
 <repo>/scripts/agent-sync
@@ -415,8 +424,10 @@ Then, once, the duplicates already on this machine. Look first, then answer for 
 <repo>/scripts/agent-sync cleanup
 ```
 
-Every yes moves a folder into the archive. Nothing is deleted. The last line prints the
-`--restore` command for this cleanup run; keep it.
+A yes moves the folder into the archive unless cleanup prints why not, under the folder: it is
+or holds a symlink, part of it cannot be read, it changed while the question was open, or its
+archive is on another volume. Nothing is deleted. When anything was archived, the last line prints
+the `--restore` command for this cleanup run; keep it.
 
 **Verify.** Run it again:
 
@@ -424,24 +435,31 @@ Every yes moves a folder into the archive. Nothing is deleted. The last line pri
 <repo>/scripts/agent-sync --check
 ```
 
-It exits 0 and its summary reads `0 changed` with no `duplicate` row. Then start a fresh session in
-each harness, run `/skills reload` first in agy, and open its list of skills: a skill from a
-managed plugin appears once.
+It exits 0 and its summary reads `0 changed`: nothing has drifted. A `duplicate` row may remain.
+It names a flat copy that cleanup kept, because you answered no or for one of the reasons cleanup
+printed under it. Each such copy still shadows its plugin until you deal with it. Then start a
+fresh session in each harness, run `/skills reload` first in agy, and open its list of skills: a
+skill from a managed plugin appears once, apart from the copies the `duplicate` rows name.
 
 **Undo.** Each part has its own:
 
 - **The cleanup:** run the `--restore` line it printed, as
-  `<repo>/scripts/agent-sync cleanup --restore <timestamp>`. Add `--dry-run` first to see what
-  it would move.
-- **An agy copy:** delete `~/.gemini/config/skills/<name>/`. Where a run replaced a folder, its
-  `copied` row names where the previous copy went in
+  `<repo>/scripts/agent-sync cleanup --restore <timestamp>`, with the flat folders resolving
+  where they did at cleanup: the same `CLAUDE_CONFIG_DIR`, and `~/.claude` and `~/.agents`
+  leading to the same folders. Restore refuses a folder whose profile changed and keeps it
+  archived. Add `--dry-run` first to see what it would move.
+- **An agy copy:** it is `~/.gemini/config/skills/<name>/`, where `<name>` is the `copied` row's
+  item without its `<plugin>/` prefix; a dry run's `unchecked` row prints the whole path. If you
+  have edited the copy since, move it out of agy's skills folder to keep your edits; otherwise
+  delete it. Where a run replaced a folder, its `copied` row names where the previous copy went in
   `~/.local/state/agent-sync/archive/<timestamp>/agy/`; move that folder back instead.
 - **A plugin:** agent-sync never uninstalls. Use the harness's own command:
   `claude plugin uninstall <plugin>@<marketplace>` and `claude plugin marketplace remove <name>`
   for Claude Code, `codex plugin remove <plugin>@<marketplace>` and
   `codex plugin marketplace remove <name>` for Codex.
-- **agent-sync itself:** delete `~/.config/agent-sync/`, `~/.cache/agent-sync/` and, once nothing
-  in its archive is wanted, `~/.local/state/agent-sync/`.
+- **agent-sync itself:** delete the manifest folder the first command named,
+  `~/.cache/agent-sync/` and, once nothing in its archive is wanted,
+  `~/.local/state/agent-sync/`.
 
 **Why it works this way.** agent-sync drives each harness through its own CLI and writes no harness
 settings file, and agy is the one harness that gets copies, because it cannot follow a third-party
