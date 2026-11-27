@@ -947,6 +947,9 @@ class Context:
         self.report = Report()
         self.state = State(paths.state)
         self.ts = timestamp()
+        self.sources = {}      # memo: one resolved tree per marketplace source per run
+        self.catalogs = {}     # memo: tree -> Catalog
+        self.selected = {}     # harness -> {skill name: (plugin id, path)} for duplicates/cleanup
 
     def save_state(self):
         if self.apply:
@@ -1037,6 +1040,942 @@ def check_prerequisites(ctx):
 
 def run_cleanup(ctx):
     raise UsageError("cleanup is not available yet")
+
+
+# ── Sources: checkouts and agent-sync's own Git cache (spec §6) ───────────────────────────────
+
+@dataclass
+class Source:
+    kind: str                 # "checkout", "git" or "path"
+    tree: str = None          # None when not available in this run
+    revision: str = None
+    dirty: bool = False
+    before: str = None        # git: the cache's revision before this run fetched
+    error: str = None
+    unchecked: bool = False   # dry run with no cache yet
+    reported: bool = False    # its error is already in the report
+
+    def label(self):
+        if self.kind == "checkout":
+            return "%s (%s)" % ((self.revision or "no HEAD")[:7], "dirty" if self.dirty
+                                else "clean")
+        return (self.revision or "")[:7]
+
+
+def git_url(value):
+    """owner/repo is a GitHub repository; anything else is a Git URL already."""
+    if re.match(r"^[\w.-]+/[\w.-]+$", value):
+        return "https://github.com/%s.git" % value
+    return value
+
+
+def normalize_git(value):
+    """A comparable form of a Git source: host/path, no scheme, user, ref or .git suffix."""
+    v = git_url(value.strip()).split("#")[0]
+    m = re.match(r"^[\w.-]+@([\w.-]+):(.*)$", v)
+    if m:
+        v = m.group(1) + "/" + m.group(2)
+    v = re.sub(r"^[a-z+]+://", "", v)
+    v = re.sub(r"^[^/@]+@", "", v)
+    v = re.sub(r"(\.git)?/*$", "", v)
+    host, _, path = v.partition("/")
+    return host.lower() + "/" + path
+
+
+def same_path(a, b):
+    return bool(a and b) and os.path.realpath(a) == os.path.realpath(b)
+
+
+def checkout_source(ctx, path):
+    key = ("checkout", path)
+    if key not in ctx.sources:
+        src = Source("checkout", tree=path)
+        if shutil.which("git"):
+            head = ctx.runner.run(["git", "-C", path, "rev-parse", "HEAD"], GIT_TIMEOUT)
+            src.revision = head.stdout.strip() if head.ok else None
+            status = ctx.runner.run(["git", "-C", path, "--no-optional-locks", "status",
+                                     "--porcelain"], GIT_TIMEOUT)
+            src.dirty = status.ok and bool(status.stdout.strip())
+        ctx.sources[key] = src
+    return ctx.sources[key]
+
+
+def git_source(ctx, key, url, ref):
+    """agent-sync's own clone of a Git source, moved to `ref` (never a harness's cache)."""
+    if key in ctx.sources:
+        return ctx.sources[key]
+    d = os.path.join(ctx.paths.sources, key)
+    run = lambda *a: ctx.runner.run(["git", "-C", d] + list(a), GIT_TIMEOUT)  # noqa: E731
+    before = None
+    if os.path.isdir(os.path.join(d, ".git")):
+        r = run("rev-parse", "HEAD")
+        before = r.stdout.strip() if r.ok else None
+    src = Source("git", before=before)
+    ctx.sources[key] = src
+    if not ctx.fetch:
+        src.tree, src.revision = (d, before) if before else (None, None)
+        src.unchecked = before is None
+        return src
+    if os.path.isdir(d):
+        origin = run("remote", "get-url", "origin")
+        if not origin.ok or origin.stdout.strip() != url:
+            shutil.rmtree(d)
+    if not os.path.isdir(d):
+        os.makedirs(os.path.dirname(d), exist_ok=True)
+        r = ctx.runner.run(["git", "clone", "--no-checkout", url, d], GIT_TIMEOUT)
+        if not r.ok:
+            src.error = "cannot clone %s: %s" % (redact(url), r.error())
+            return src
+    for args in (("fetch", "--tags", "origin", ref or "HEAD"),
+                 ("checkout", "--detach", "FETCH_HEAD"), ("rev-parse", "HEAD")):
+        r = run(*args)
+        if not r.ok:
+            src.error = "cannot %s %s at %s: %s" % (args[0], redact(url), ref or "HEAD",
+                                                     r.error())
+            return src
+    src.tree, src.revision = d, r.stdout.strip()
+    return src
+
+
+def marketplace_source(ctx, m, harness):
+    if m.source[harness] == "checkout":
+        return checkout_source(ctx, m.checkout)
+    return git_source(ctx, m.name, git_url(m.git), m.ref)
+
+
+# ── Catalog: plugins, enrolment and skills (spec §3, §6) ──────────────────────────────────────
+
+class CatalogError(Exception):
+    pass
+
+
+@dataclass
+class Skill:
+    name: str
+    path: str
+    plugin: str = None        # plugin id, or None for a [[skill]]
+    error: str = None
+
+
+class Catalog:
+    def __init__(self, tree):
+        self.tree = tree
+        path = os.path.join(tree, ".claude-plugin", "marketplace.json")
+        try:
+            with open(path) as f:
+                doc = json.load(f)
+            self.name = doc["name"]
+            self.root = (doc.get("metadata") or {}).get("pluginRoot") or ""
+            self.entries = {e["name"]: e for e in doc.get("plugins", [])}
+        except (OSError, ValueError, KeyError, TypeError) as e:
+            raise CatalogError("cannot read %s: %s" % (tilde(path), e))
+
+    def plugin_dir(self, name):
+        src = self.entries[name].get("source")
+        if not isinstance(src, str):
+            return None
+        if not src.startswith("./") and src not in (".", "./") and self.root:
+            src = os.path.join(self.root, src)
+        return self.inside(src)
+
+    def inside(self, rel, base=None):
+        p = os.path.normpath(os.path.join(base or self.tree, rel))
+        if p != self.tree and not p.startswith(self.tree.rstrip("/") + "/"):
+            raise CatalogError("%s points outside the catalog" % rel)
+        return p
+
+    def skills(self, name):
+        """The plugin's skills: the declared `skills` paths (catalog entry, else plugin.json),
+        defaulting to every <plugin>/skills/*/SKILL.md."""
+        pid = "%s@%s" % (name, self.name)
+        pdir = self.plugin_dir(name)
+        if pdir is None:
+            raise CatalogError("its source is outside the catalog, so its skills cannot be read")
+        declared = self.entries[name].get("skills")
+        if declared is None:
+            try:
+                with open(os.path.join(pdir, ".claude-plugin", "plugin.json")) as f:
+                    declared = json.load(f).get("skills")
+            except (OSError, ValueError, AttributeError):
+                declared = None
+        found = []
+        if declared is None:
+            base = os.path.join(pdir, "skills")
+            dirs = [os.path.join(base, n) for n in sorted(os.listdir(base))] \
+                if os.path.isdir(base) else []
+        else:
+            dirs = []
+            for rel in [declared] if isinstance(declared, str) else declared:
+                p = self.inside(rel, pdir)
+                if os.path.isfile(os.path.join(p, "SKILL.md")):
+                    dirs.append(p)
+                elif os.path.isdir(p):
+                    dirs += [os.path.join(p, n) for n in sorted(os.listdir(p))]
+                else:
+                    raise CatalogError("declared skills path %s does not exist" % rel)
+        for d in dirs:
+            if os.path.isfile(os.path.join(d, "SKILL.md")):
+                found.append(Skill(os.path.basename(d), d, pid, front_matter_error(d)))
+        return found
+
+
+def front_matter_error(skill_dir):
+    """A skill's folder name must equal the `name:` in its SKILL.md front matter."""
+    name = os.path.basename(skill_dir)
+    try:
+        with open(os.path.join(skill_dir, "SKILL.md"), encoding="utf-8") as f:
+            text = f.read()
+    except (OSError, UnicodeDecodeError) as e:
+        return "cannot read SKILL.md: %s" % e
+    m = re.match(r"^---\s*\n(.*?)\n---", text, re.S)
+    found = re.search(r"^name:\s*(.*?)\s*$", m.group(1), re.M) if m else None
+    declared = found.group(1).strip("'\"") if found else None
+    if declared != name:
+        return "folder %s but its front matter says name: %s" % (name, declared)
+    return None
+
+
+def catalog_for(ctx, m, src):
+    """The catalog in a source tree, its name checked against the manifest. None if absent."""
+    if src.tree is None:
+        return None
+    if src.tree not in ctx.catalogs:
+        cat = Catalog(src.tree)
+        if cat.name != m.name:
+            raise CatalogError("the catalog at %s is named %s, not %s"
+                               % (tilde(src.tree), cat.name, m.name))
+        ctx.catalogs[src.tree] = cat
+    return ctx.catalogs[src.tree]
+
+
+@dataclass
+class Enrolled:
+    id: str
+    name: str
+    agy_skills: tuple = None
+
+
+def enrol(ctx, m, harness, cat):
+    """Plugins of marketplace m enrolled for a harness, and (id, reason) for rows that fail."""
+    rows = [r for r in ctx.manifest.plugins.values() if r.marketplace == m.name]
+    failed, enrolled = [], []
+    if cat is None:   # dry run, catalog not fetched: rows only, unverified
+        return [Enrolled(r.id, r.name, r.agy_skills) for r in rows
+                if harness in r.harnesses and m.plugins == "listed"], failed
+    for r in rows:
+        if r.name not in cat.entries and harness in r.harnesses:
+            failed.append((r.id, "the catalog at %s has no plugin %s" % (
+                (cat_label(ctx, m, harness)), r.name)))
+    if m.plugins == "all":
+        by_name = {r.name: r for r in rows}
+        for name in cat.entries:
+            row = by_name.get(name)
+            if name in m.exclude or harness not in (row.harnesses if row else m.harnesses):
+                continue
+            enrolled.append(Enrolled("%s@%s" % (name, m.name), name,
+                                     row.agy_skills if row else None))
+    else:
+        enrolled = [Enrolled(r.id, r.name, r.agy_skills) for r in rows
+                    if harness in r.harnesses and r.name in cat.entries]
+    return enrolled, failed
+
+
+def cat_label(ctx, m, harness):
+    src = marketplace_source(ctx, m, harness)
+    return "checkout %s" % tilde(m.checkout) if src.kind == "checkout" else \
+        "%s %s" % (m.ref or "default branch", src.label())
+
+
+def marketplaces_for(ctx, harness):
+    return [m for m in ctx.manifest.marketplaces.values()
+            if m.source[harness] != "none" and harness in ctx.manifest.harnesses_using(m)]
+
+
+def resolve_marketplace(ctx, m, harness):
+    """(Source, Catalog) for a harness, or (None, None) with a failed/skipped row added."""
+    src = marketplace_source(ctx, m, harness)
+    item = "marketplace %s" % m.name
+    if src.error:
+        if src.reported:
+            ctx.report.add(harness, item, "skipped", "its Git source failed above")
+        else:
+            src.reported = True
+            ctx.report.add(harness, item, "failed", src.error)
+        return None, None
+    try:
+        return src, catalog_for(ctx, m, src)
+    except CatalogError as e:
+        ctx.report.add(harness, item, "failed", str(e))
+        return None, None
+
+
+def harness_present(ctx, harness):
+    if shutil.which(harness):
+        return True
+    if ctx.only:
+        ctx.report.add(harness, "%s CLI" % harness, "failed",
+                       "not installed, and named in --only")
+    else:
+        ctx.report.add(harness, "%s CLI" % harness, "skipped", "not installed",
+                       note="not installed")
+    return False
+
+
+def planned(ctx, harness, item, argv, why=""):
+    ctx.report.add(harness, item, "unchecked", "%swould run: %s" % (why, " ".join(argv)),
+                   argv=argv)
+
+
+def skip_plugins(ctx, harness, plugins, why):
+    for e in plugins:
+        ctx.report.add(harness, e.id, "skipped", why)
+
+
+def held_shown(doc):
+    """The shownCommand of a held declared command (C4), or None."""
+    if doc and doc.get("failureCode") == "command_source_refused":
+        shown = doc.get("shownCommand")
+        if isinstance(shown, dict) and re.match(r"^[0-9a-f]{64}$", str(shown.get("sha256"))):
+            return shown
+    return None
+
+
+def add_held(ctx, harness, pid, shown):
+    first = "declared command awaits confirmation:"
+    if shown.get("acceptCommandMatched") is False:
+        first = "the hash given was refused (the command or the catalog changed); " + first
+    ctx.report.add(harness, pid, "held", "%s\n`%s`\nre-run with --accept-command %s=%s"
+                   % (first, shown.get("command", "?"), pid, shown["sha256"]),
+                   sha256=shown["sha256"], command=shown.get("command"))
+
+
+def revision_detail(m, before, after):
+    ref = m.ref or "default branch"
+    if before and after and before != after:
+        return "%s: %s → %s" % (ref, before[:7], after[:7])
+    return "%s: %s" % (ref, (after or "")[:7])
+
+
+# ── Claude Code (spec §5.1) ───────────────────────────────────────────────────────────────────
+
+def claude_list(ctx, what):
+    argv = ["claude", "plugin"] + (["marketplace"] if what == "marketplaces" else []) + \
+        ["list", "--json"]
+    r = ctx.runner.run(argv, extra_env=CLAUDE_LIST_ENV)
+    doc = json_document(r.stdout) if r.ok else None
+    if not isinstance(doc, list):
+        ctx.report.add("claude", "claude CLI", "failed", "cannot read its %s: %s"
+                       % (what, r.error() if not r.ok else "unexpected output"))
+        return None
+    if what == "plugins":
+        return {p["id"]: p for p in doc if isinstance(p, dict) and p.get("scope", "user") ==
+                "user" and not str(p.get("id", "")).endswith("@builtin")}
+    return {mk.get("name"): mk for mk in doc if isinstance(mk, dict)}
+
+
+def claude_source_arg(m):
+    if m.source["claude"] == "checkout":
+        return m.checkout
+    # C-probe 2026-11-27: Claude takes a ref as a `#<ref>` suffix and lists it back as "ref".
+    return m.git + ("#" + m.ref if m.ref else "")
+
+
+def claude_marketplace(ctx, m, src, observed, state):
+    """Add, compare or refresh one marketplace. Returns True when its plugins may proceed."""
+    h, item = "claude", "marketplace %s" % m.name
+    add = ["claude", "plugin", "marketplace", "add", "--scope", "user", "--json",
+           claude_source_arg(m)]
+    if observed is None:
+        if not ctx.apply:
+            planned(ctx, h, item, add)
+            return True
+        r = ctx.runner.run(add)
+        doc = json_last_line(r.stdout)
+        if not r.ok or not doc or doc.get("outcome") != "ok":
+            ctx.report.add(h, item, "failed", r.error())
+            return False
+        if doc.get("marketplace") not in (None, m.name):
+            ctx.report.add(h, item, "failed", "added, but it is named %s" % doc["marketplace"])
+            return False
+        state[m.name] = {"revision": src.revision} if m.source[h] == "git" else \
+            {"digest": checkout_digest(m.checkout)}
+        ctx.report.add(h, item, "installed", "added from %s%s" % (
+            tilde(redact(claude_source_arg(m))), ", " + src.label() if src.revision else ""))
+        return True
+    kind = observed.get("source")
+    have = observed.get("url") or observed.get("repo") or observed.get("path")
+    if m.source[h] == "checkout":
+        matches = kind == "directory" and same_path(have, m.checkout)
+        want = m.checkout
+    else:
+        matches = kind in ("git", "github", "url") and have and \
+            normalize_git(have) == normalize_git(m.git)
+        want = git_url(m.git)
+    if kind not in ("directory", "git", "github", "url") or not have:
+        ctx.report.add(h, item, "unverifiable", "Claude lists it with a source shape agent-sync "
+                                                "does not recognise; not compared")
+    elif not matches:
+        ctx.report.add(h, item, "source-mismatch",
+                       "Claude has %s, the manifest says %s; to change it by hand:\n"
+                       "claude plugin marketplace remove %s\n%s"
+                       % (redact(have), redact(want), m.name, " ".join(add)))
+        return False
+    elif m.source[h] == "git" and (observed.get("ref") or None) != m.ref:
+        ctx.report.add(h, item, "ref-mismatch",
+                       "Claude follows %s, the manifest says %s; to change it by hand:\n"
+                       "claude plugin marketplace remove %s\n%s"
+                       % (observed.get("ref") or "the default branch",
+                          m.ref or "the default branch", m.name, " ".join(add)))
+        return False
+    if m.source[h] == "checkout":
+        digest = checkout_digest(m.checkout)
+        last = (state.get(m.name) or {}).get("digest")
+        state[m.name] = {"digest": digest}
+        ctx.report.add(h, item, "live", "checkout %s, digest %s" % (
+            src.label(), "unchanged" if last == digest else "changed" if last else "recorded"))
+        return True
+    update = ["claude", "plugin", "marketplace", "update", "--json", m.name]
+    last = (state.get(m.name) or {}).get("revision") or src.before
+    if ctx.dry_run:
+        planned(ctx, h, item, update, "remote not fetched; ")
+        return True
+    if ctx.check:
+        if last == src.revision:
+            ctx.report.add(h, item, "unchanged", revision_detail(m, None, src.revision))
+        else:
+            planned(ctx, h, item, update, revision_detail(m, last, src.revision) + "; ")
+        return True
+    r = ctx.runner.run(update)
+    doc = json_last_line(r.stdout)
+    if not r.ok or (doc and doc.get("outcome") not in (None, "ok")):
+        ctx.report.add(h, item, "failed", r.error())
+        return False
+    state[m.name] = {"revision": src.revision}
+    moved = last and last != src.revision
+    ctx.report.add(h, item, "updated" if moved else "unchanged",
+                   revision_detail(m, last, src.revision) +
+                   ("" if moved else " (catalog refreshed)"))
+    return True
+
+
+def checkout_digest(path):
+    try:
+        return digest_tree(path)[0]
+    except (SymlinkError, OSError):
+        return None
+
+
+def files(n):
+    return "%d file%s" % (n, "" if n == 1 else "s")
+
+
+def claude_plugin(ctx, m, e, observed, git_moved):
+    """Install, update or enable one plugin. Returns its row for the version fill, or None."""
+    h = "claude"
+    accept = ["--accept-command", ctx.accept[e.id]] if e.id in ctx.accept else []
+    if observed is None:
+        argv = ["claude", "plugin", "install", "--scope", "user", "--json"] + accept + [e.id]
+    elif observed.get("readFromFolder") or (ctx.check and not git_moved):
+        argv = None        # read live from its folder (C2), or nothing moved upstream
+    else:
+        argv = ["claude", "plugin", "update", "--scope", "user", "--json"] + accept + [e.id]
+    disabled = observed is not None and not observed.get("enabled", True)
+    if not ctx.apply:
+        if argv:
+            planned(ctx, h, e.id, argv)
+        if disabled:
+            planned(ctx, h, e.id, ["claude", "plugin", "enable", "--scope", "user", "--json",
+                                   e.id])
+        return None if argv or disabled else ctx.report.add(h, e.id, "unchanged")
+    verb, detail = "unchanged", ""
+    if argv:
+        r = ctx.runner.run(argv)
+        doc = json_last_line(r.stdout)
+        shown = held_shown(doc)     # a held command exits 1 like a failure (C4)
+        if shown:
+            add_held(ctx, h, e.id, shown)
+            return None
+        if not r.ok or not doc or doc.get("outcome") != "ok":
+            ctx.report.add(h, e.id, "failed", r.error())
+            return None
+        if observed is None:
+            verb = "installed"
+        elif doc.get("updateOutcome") != "up_to_date" and \
+                doc.get("oldVersion") != doc.get("newVersion"):
+            verb, detail = "updated", "%s → %s" % (doc.get("oldVersion"), doc.get("newVersion"))
+    if disabled:
+        if not claude_enable(ctx, e.id):
+            return None
+        if verb == "unchanged":
+            verb = "enabled"
+    return ctx.report.add(h, e.id, verb, detail)
+
+
+def claude_enable(ctx, pid):
+    r = ctx.runner.run(["claude", "plugin", "enable", "--scope", "user", "--json", pid])
+    doc = json_last_line(r.stdout)
+    if r.ok and doc and doc.get("outcome") == "ok":
+        return True
+    ctx.report.add("claude", pid, "failed", "cannot enable: " + r.error())
+    return False
+
+
+def sync_claude(ctx):
+    h = "claude"
+    if h not in ctx.harnesses or not harness_present(ctx, h):
+        return
+    markets = claude_list(ctx, "marketplaces")
+    plugins = claude_list(ctx, "plugins") if markets is not None else None
+    if plugins is None:
+        return
+    state = ctx.applied(h)
+    managed, unknown, rows = set(), set(), []
+    for m in marketplaces_for(ctx, h):
+        src, cat = resolve_marketplace(ctx, m, h)
+        if src is None:
+            unknown.add(m.name)
+            continue
+        if cat is None and m.plugins == "all":
+            unknown.add(m.name)
+            ctx.report.add(h, "marketplace %s" % m.name, "unchecked",
+                           "catalog not fetched yet; its plugins are listed by --check or a run")
+            continue
+        enrolled, failed = enrol(ctx, m, h, cat)
+        before = (state.get(m.name) or {}).get("revision") or src.before
+        proceed = claude_marketplace(ctx, m, src, markets.get(m.name), state)
+        ctx.save_state()
+        for pid, why in failed:
+            ctx.report.add(h, pid, "failed", why)
+        managed.update(e.id for e in enrolled)
+        if not proceed:
+            skip_plugins(ctx, h, enrolled, "marketplace %s needs attention above" % m.name)
+            continue
+        moved = before != src.revision
+        for e in enrolled:
+            row = claude_plugin(ctx, m, e, plugins.get(e.id), moved)
+            if row is not None:
+                rows.append(row)
+        record_selection(ctx, h, cat, enrolled, plugins)
+    if any(r.result in CHANGED for r in rows) and ctx.apply:
+        plugins = claude_list(ctx, "plugins") or {}
+    for row in rows:
+        p = plugins.get(row.item)
+        if p is None or not p.get("enabled", True):
+            if row.result in CHANGED:
+                row.result, row.detail = "failed", "not listed as enabled after the change"
+            continue
+        info = "%s, enabled, user" % p.get("version", "?")
+        row.detail = "%s (%s)" % (info, row.detail) if row.detail else info
+    for pid in plugins:
+        if pid not in managed and pid.partition("@")[2] not in unknown:
+            ctx.report.add(h, pid, "unmanaged", "not in the manifest; left as it is")
+
+
+def record_selection(ctx, harness, cat, enrolled, installed):
+    """Remember the skills of enabled managed plugins, for the duplicate check (spec §7)."""
+    if cat is None:
+        return
+    sel = ctx.selected.setdefault(harness, {})
+    for e in enrolled:
+        p = installed.get(e.id)
+        if p is None or not p.get("enabled", True):
+            continue
+        with contextlib.suppress(CatalogError, OSError, KeyError):
+            for s in cat.skills(e.name):
+                sel.setdefault(s.name, (e.id, s.path, p.get("version")))
+
+
+# ── Codex (spec §5.2) ─────────────────────────────────────────────────────────────────────────
+
+def codex_refs(ctx):
+    """{marketplace: ref} read from Codex's config.toml (read-only), or None if unrecognised."""
+    try:
+        with open(os.path.join(ctx.paths.codex_home, "config.toml"), "rb") as f:
+            doc = tomllib.load(f)
+    except (OSError, tomllib.TOMLDecodeError):
+        return None
+    tables = doc.get("marketplaces")
+    if not isinstance(tables, dict) or not all(isinstance(t, dict) for t in tables.values()):
+        return None
+    return {name: t.get("ref") for name, t in tables.items()}
+
+
+def codex_plugins(ctx, name):
+    r = ctx.runner.run(["codex", "plugin", "list", "--marketplace", name, "--json"])
+    doc = json_document(r.stdout) if r.ok else None
+    if not isinstance(doc, dict) or not isinstance(doc.get("installed"), list):
+        ctx.report.add("codex", "marketplace %s" % name, "failed",
+                       "cannot list its plugins: %s" % (r.error() if not r.ok else "unexpected "
+                                                                                     "output"))
+        return None
+    return {p["pluginId"]: p for p in doc["installed"] if isinstance(p, dict) and
+            p.get("pluginId")}
+
+
+def codex_marketplace(ctx, m, src, observed, refs, state):
+    h, item = "codex", "marketplace %s" % m.name
+    use_git = m.source[h] == "git"
+    add = ["codex", "plugin", "marketplace", "add", "--json"] + \
+        (["--ref", m.ref] if use_git and m.ref else []) + [m.git if use_git else m.checkout]
+    if observed is None:
+        if not ctx.apply:
+            planned(ctx, h, item, add)
+            return True
+        r = ctx.runner.run(add)
+        doc = json_document(r.stdout) if r.ok else None
+        if not isinstance(doc, dict):
+            ctx.report.add(h, item, "failed", r.error())
+            return False
+        if doc.get("marketplaceName") not in (None, m.name):
+            ctx.report.add(h, item, "failed", "added, but it is named %s"
+                           % doc["marketplaceName"])
+            return False
+        state[m.name] = {"revision": src.revision}
+        ctx.report.add(h, item, "installed", "added from %s%s" % (
+            tilde(redact(add[-1])), ", " + src.label() if src.revision else ""))
+        return True
+    source = observed.get("marketplaceSource") or {}
+    kind, have = source.get("sourceType"), source.get("source")
+    if use_git:
+        matches = kind == "git" and have and normalize_git(have) == normalize_git(m.git)
+    else:
+        matches = kind != "git" and (same_path(have, m.checkout) or
+                                     same_path(observed.get("root"), m.checkout))
+    if not kind or not have:
+        ctx.report.add(h, item, "unverifiable", "Codex lists it with a source shape agent-sync "
+                                                "does not recognise; not compared")
+    elif not matches:
+        ctx.report.add(h, item, "source-mismatch",
+                       "Codex has %s, the manifest says %s; to change it by hand:\n"
+                       "codex plugin marketplace remove %s\n%s"
+                       % (redact(have), redact(add[-1]), m.name, " ".join(add)))
+        return False
+    if use_git and m.ref:
+        if refs is None or m.name not in refs:
+            ctx.report.add(h, item, "unverifiable", "its ref could not be read from %s; "
+                                                    "not compared"
+                           % tilde(os.path.join(ctx.paths.codex_home, "config.toml")))
+        elif refs[m.name] != m.ref:
+            ctx.report.add(h, item, "ref-mismatch",
+                           "Codex follows %s, the manifest says %s; to change it by hand "
+                           "(installed plugins come back by themselves):\n"
+                           "codex plugin marketplace remove %s\n%s"
+                           % (refs[m.name] or "the default branch", m.ref, m.name,
+                              " ".join(add)))
+            return False
+    if not use_git:
+        ctx.report.add(h, item, "unchanged", "checkout %s; Codex copies plugins at install, "
+                                             "so edits show as stale below" % src.label())
+        return True
+    upgrade = ["codex", "plugin", "marketplace", "upgrade", "--json", m.name]
+    last = (state.get(m.name) or {}).get("revision") or src.before
+    if ctx.dry_run:
+        planned(ctx, h, item, upgrade, "remote not fetched; ")
+        return True
+    if ctx.check:
+        if last == src.revision:
+            ctx.report.add(h, item, "unchanged", revision_detail(m, None, src.revision))
+        else:
+            planned(ctx, h, item, upgrade, revision_detail(m, last, src.revision) + "; ")
+        return True
+    r = ctx.runner.run(upgrade)
+    doc = json_document(r.stdout) if r.ok else None
+    if not isinstance(doc, dict) or doc.get("errors"):
+        ctx.report.add(h, item, "failed", r.error() if not isinstance(doc, dict) else
+                       "; ".join(str(x) for x in doc["errors"]))
+        return False
+    state[m.name] = {"revision": src.revision}
+    moved = last and last != src.revision
+    ctx.report.add(h, item, "updated" if moved else "unchanged",
+                   revision_detail(m, last, src.revision))
+    return True
+
+
+def codex_cache_check(ctx, m, cat, name, version):
+    """'match', 'stale' or 'unverifiable' for one installed plugin's skill trees (spec §5.2)."""
+    cache = os.path.join(ctx.paths.codex_home, "plugins", "cache", m.name, name, str(version))
+    if not version or not os.path.isdir(cache):
+        return "unverifiable"
+    try:
+        pdir = cat.plugin_dir(name)
+        for s in cat.skills(name):
+            mine = os.path.join(cache, os.path.relpath(s.path, pdir))
+            if not os.path.isdir(mine) or digest_tree(mine)[0] != digest_tree(s.path)[0]:
+                return "stale"
+    except (CatalogError, SymlinkError, OSError, TypeError):
+        return "unverifiable"
+    return "match"
+
+
+def codex_plugin(ctx, m, src, cat, e, observed):
+    h = "codex"
+    add = ["codex", "plugin", "add", "--json", e.id]
+    at = "checkout %s" % src.label() if src.kind == "checkout" else src.label()
+    if observed is None:
+        if not ctx.apply:
+            return planned(ctx, h, e.id, add)
+        r = ctx.runner.run(add)
+        doc = json_document(r.stdout) if r.ok else None
+        if not isinstance(doc, dict):
+            return ctx.report.add(h, e.id, "failed", r.error())
+        observed = {"version": doc.get("version")}
+        verdict = codex_cache_check(ctx, m, cat, e.name, observed["version"]) if cat else None
+        detail = "%s%s" % (observed["version"], ", cache digest matches %s" % at
+                           if verdict == "match" else "")
+        return ctx.report.add(h, e.id, "installed", detail)
+    version = observed.get("version")
+    if cat is None:
+        return ctx.report.add(h, e.id, "unchecked", "%s; catalog not fetched, cache not "
+                                                    "compared" % version)
+    verdict = codex_cache_check(ctx, m, cat, e.name, version)
+    if verdict == "match":
+        return ctx.report.add(h, e.id, "unchanged", "%s, cache digest matches %s" % (version, at))
+    if verdict == "unverifiable":
+        return ctx.report.add(h, e.id, "unverifiable", "%s; cache layout not recognised, not "
+                                                       "compared" % version)
+    stale = "cache differs from %s at the same version; see \"Codex stale cache\" in " \
+            "docs/agent-sync.md" % at
+    if not ctx.args.repair:
+        return ctx.report.add(h, e.id, "stale", stale + "; --repair reinstalls it")
+    if not ctx.apply:
+        return planned(ctx, h, e.id, add, stale + "; ")
+    r = ctx.runner.run(add)
+    if not r.ok:
+        return ctx.report.add(h, e.id, "failed", "repair failed, cache left as it was: "
+                              + r.error())
+    if codex_cache_check(ctx, m, cat, e.name, version) == "match":
+        return ctx.report.add(h, e.id, "updated", "%s, repaired: cache now matches %s"
+                              % (version, at))
+    return ctx.report.add(h, e.id, "stale", stale + "; still differs after --repair")
+
+
+def sync_codex(ctx):
+    h = "codex"
+    if h not in ctx.harnesses or not harness_present(ctx, h):
+        return
+    r = ctx.runner.run(["codex", "plugin", "marketplace", "list", "--json"])
+    doc = json_document(r.stdout) if r.ok else None
+    if not isinstance(doc, dict) or not isinstance(doc.get("marketplaces"), list):
+        ctx.report.add(h, "codex CLI", "failed", "cannot read its marketplaces: %s"
+                       % (r.error() if not r.ok else "unexpected output"))
+        return
+    markets = {mk.get("name"): mk for mk in doc["marketplaces"] if isinstance(mk, dict)}
+    refs = codex_refs(ctx)
+    state = ctx.applied(h)
+    for m in marketplaces_for(ctx, h):
+        src, cat = resolve_marketplace(ctx, m, h)
+        if src is None:
+            continue
+        if cat is None and m.plugins == "all":
+            ctx.report.add(h, "marketplace %s" % m.name, "unchecked",
+                           "catalog not fetched yet; its plugins are listed by --check or a run")
+            continue
+        enrolled, failed = enrol(ctx, m, h, cat)
+        proceed = codex_marketplace(ctx, m, src, markets.get(m.name), refs, state)
+        ctx.save_state()
+        for pid, why in failed:
+            ctx.report.add(h, pid, "failed", why)
+        if not proceed:
+            skip_plugins(ctx, h, enrolled, "marketplace %s needs attention above" % m.name)
+            continue
+        present = markets.get(m.name) is not None or ctx.apply
+        installed = codex_plugins(ctx, m.name) if present else {}
+        if installed is None:
+            skip_plugins(ctx, h, enrolled, "its plugins could not be listed")
+            continue
+        for e in enrolled:
+            codex_plugin(ctx, m, src, cat, e, installed.get(e.id))
+        if ctx.apply and any(r.result in CHANGED and r.harness == h for r in ctx.report.rows):
+            installed = codex_plugins(ctx, m.name) or installed
+        record_selection(ctx, h, cat, enrolled, installed)
+        ids = {e.id for e in enrolled}
+        for pid in installed:
+            if pid not in ids:
+                ctx.report.add(h, pid, "unmanaged", "not in the manifest; left as it is")
+
+
+# ── agy: skill copies (spec §5.3, §6) ─────────────────────────────────────────────────────────
+
+def agy_selection(ctx):
+    """Every skill the manifest selects for agy, with failures reported. -> [(Skill, label)]"""
+    h = "agy"
+    out = []
+    for m in marketplaces_for(ctx, h):
+        src, cat = resolve_marketplace(ctx, m, h)
+        if src is None:
+            continue
+        if cat is None:
+            ctx.report.add(h, "marketplace %s" % m.name, "unchecked",
+                           "catalog not fetched yet; its skills are listed by --check or a run")
+            continue
+        enrolled, failed = enrol(ctx, m, h, cat)
+        for pid, why in failed:
+            ctx.report.add(h, pid, "failed", why)
+        for e in enrolled:
+            try:
+                skills = cat.skills(e.name)
+            except (CatalogError, OSError) as err:
+                ctx.report.add(h, e.id, "failed", str(err))
+                continue
+            if e.agy_skills is not None:
+                unknown = sorted(set(e.agy_skills) - {s.name for s in skills})
+                if unknown:
+                    ctx.report.add(h, e.id, "failed", "agy_skills names %s, not a skill of this "
+                                                      "plugin" % ", ".join(unknown))
+                    continue
+                skills = [s for s in skills if s.name in e.agy_skills]
+            out += [(s, src.label()) for s in skills]
+    for s in ctx.manifest.skills:
+        if s.path:
+            out.append((Skill(s.name, s.path, None, front_matter_error(s.path)), None))
+            continue
+        src = git_source(ctx, "skill-" + s.name, git_url(s.git), s.ref)
+        if src.error or src.tree is None:
+            ctx.report.add(h, s.name, "failed" if src.error else "unchecked",
+                           src.error or "source not fetched yet")
+            continue
+        path = os.path.join(src.tree, s.subdir) if s.subdir else src.tree
+        if not os.path.isfile(os.path.join(path, "SKILL.md")):
+            ctx.report.add(h, s.name, "failed", "%s holds no SKILL.md" % (s.subdir or "the "
+                                                                                   "repository"))
+            continue
+        out.append((Skill(s.name, path, None, front_matter_error(path)), src.label()))
+    return out
+
+
+def agy_item(skill):
+    return "%s/%s" % (skill.plugin.partition("@")[0], skill.name) if skill.plugin else skill.name
+
+
+def agy_reserved(ctx, plugins):
+    """Names agy already has: its bundled skills and every installed agy plugin's skills."""
+    reserved = {}
+    if os.path.isdir(ctx.paths.agy_builtin):
+        for n in os.listdir(ctx.paths.agy_builtin):
+            reserved[n] = "a skill bundled with agy"
+    for p in plugins:
+        for n in p.get("skills") or []:
+            reserved.setdefault(n, "agy plugin %s" % p.get("name"))
+    return reserved
+
+
+def agy_copy(ctx, skill, label):
+    h, item, name = "agy", agy_item(skill), skill.name
+    dest = os.path.join(ctx.paths.agy_skills, name)
+    record = ctx.state.data["agy"].get(name)
+    try:
+        digest, count = digest_tree(skill.path)
+    except SymlinkError as e:
+        return ctx.report.add(h, item, "failed", "%s; not copied (Rule #1: no symlinks in $HOME)"
+                              % e)
+    label = label or "local folder, digest %s" % digest[:7]
+    if os.path.lexists(dest):
+        try:
+            current = digest_tree(dest)[0]
+        except SymlinkError:
+            current = None
+        if record is None and name not in ctx.adopt:
+            return ctx.report.add(h, item, "held", "%s exists and is not agent-sync's; --adopt %s"
+                                  % (tilde(dest), name), reason="foreign")
+        if record is not None and current != record.get("digest") and name not in ctx.adopt:
+            return ctx.report.add(h, item, "held", "%s was edited by hand since agent-sync "
+                                                   "copied it; --adopt %s overwrites it (the "
+                                                   "edited copy is archived)"
+                                  % (tilde(dest), name), reason="edited")
+        if current == digest and record is not None:
+            return ctx.report.add(h, item, "unchanged", label)
+    if not ctx.apply:
+        return ctx.report.add(h, item, "unchecked", "would copy %s, %s to %s"
+                              % (label, files(count), tilde(dest)))
+    archive = os.path.join(ctx.paths.archive, ctx.ts, "agy", name)
+    try:
+        got = install_tree(skill.path, dest, ctx.paths.agy_stage, archive, ctx.paths.agy_old)
+    except TreeError as e:
+        return ctx.report.add(h, item, "failed", str(e))
+    ctx.state.data["agy"][name] = {
+        "source": skill.plugin or "skill " + name, "path": skill.path, "revision": label,
+        "digest": got["digest"], "time": datetime.datetime.now().isoformat(timespec="seconds")}
+    ctx.save_state()
+    detail = "%s, %s" % (label, files(got["files"]))
+    if got["archived"]:
+        detail += "; previous copy archived to %s" % tilde(got["archived"])
+    return ctx.report.add(h, item, "copied", detail)
+
+
+def sync_agy(ctx):
+    h = "agy"
+    if h not in ctx.harnesses or not harness_present(ctx, h):
+        return
+    r = ctx.runner.run(["agy", "plugin", "list", "--json"])
+    plugins = json_document(r.stdout) if r.ok else None
+    if not isinstance(plugins, list):
+        ctx.report.add(h, "agy CLI", "failed", "cannot read its plugins: %s"
+                       % (r.error() if not r.ok else "unexpected output"))
+        return
+    for p in (os.path.join(ctx.paths.home, ".gemini"), ctx.paths.gemini_config,
+              ctx.paths.agy_skills):
+        if os.path.islink(p):
+            ctx.report.add(h, "skills folder", "failed", "%s is a symlink; agent-sync writes "
+                                                         "nothing there" % tilde(p))
+            return
+    selection = agy_selection(ctx)
+    reserved = agy_reserved(ctx, [p for p in plugins if isinstance(p, dict)])
+    by_name = {}
+    for skill, label in selection:
+        by_name.setdefault(skill.name, []).append((skill, label))
+    for name, entries in by_name.items():
+        for skill, label in entries:
+            others = [agy_item(s) for s, _ in entries if s is not skill]
+            if name in reserved:
+                others.append(reserved[name])
+            if others:
+                ctx.report.add(h, agy_item(skill), "failed",
+                               "name collision with %s; nothing written for %s; give one plugin "
+                               "an agy_skills subset" % (", ".join(others), name),
+                               reason="name collision")
+            elif skill.error:
+                ctx.report.add(h, agy_item(skill), "failed", skill.error)
+            else:
+                agy_copy(ctx, skill, label)
+    for name in sorted(set(ctx.state.data["agy"]) - set(by_name)):
+        dest = os.path.join(ctx.paths.agy_skills, name)
+        if not ctx.args.prune or not ctx.apply:
+            ctx.report.add(h, name, "orphaned", "%s left the manifest; --prune archives it"
+                           % tilde(dest))
+            continue
+        moved = None
+        if os.path.lexists(dest):
+            moved = archive_tree(dest, os.path.join(ctx.paths.archive, ctx.ts, "agy", name))
+        del ctx.state.data["agy"][name]
+        ctx.save_state()
+        ctx.report.add(h, name, "archived", "moved to %s" % tilde(moved) if moved else
+                       "already gone; forgotten")
+    if any(row.harness == h and row.result in CHANGED for row in ctx.report.rows):
+        ctx.agy_changed = True
+
+
+def report_available(ctx):
+    """`available` rows: catalog plugins a "listed" marketplace does not enrol (spec §3)."""
+    for m in ctx.manifest.marketplaces.values():
+        if m.plugins != "listed":
+            continue
+        listed = {r.name for r in ctx.manifest.plugins.values() if r.marketplace == m.name}
+        seen = []
+        for h in ctx.manifest.harnesses_using(m):
+            if h not in ctx.harnesses or m.source[h] == "none":
+                continue
+            src = ctx.sources.get(("checkout", m.checkout) if m.source[h] == "checkout"
+                                  else m.name)
+            cat = ctx.catalogs.get(src.tree) if src and src.tree else None
+            for name in (cat.entries if cat else ()):
+                if name not in listed and name not in seen:
+                    seen.append(name)
+        for name in seen:
+            ctx.report.add("-", "%s@%s" % (name, m.name), "available",
+                           "in the catalog, not in the manifest")
+
+
+SYNC_STEPS[:] = [sync_claude, sync_codex, report_available, sync_agy]
 
 
 if __name__ == "__main__":
