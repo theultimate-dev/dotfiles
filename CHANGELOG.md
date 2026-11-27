@@ -7,14 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `scripts/agent-sync`: one command that installs and updates the coding-agent plugins you list
+  in `~/.config/agent-sync/manifest.toml`, through Claude Code's and Codex's own plugin commands,
+  and copies the skills you select into Antigravity's personal skills folder,
+  `~/.gemini/config/skills/`. It writes no agent settings file and never uninstalls anything. It
+  reports skills that a harness can reach twice, and Codex plugin caches that have fallen behind
+  their source. `agent-sync cleanup` archives, with your confirmation, older flat skill copies that
+  shadow a plugin, and `--restore` puts them back. It needs Python 3.11 or newer and runs only
+  when you run it: neither `install.sh` nor `setup.sh` calls it. See
+  [docs/agent-sync.md](docs/agent-sync.md). **Upgrade steps:** optional. To start using it,
+  follow
+  [step 3 of the manual setup, Sync agent plugins and skills](docs/manual-setup.md#3-sync-agent-plugins-and-skills).
+  The manual setup's later steps move down one: Herdr is now step 4, notifications step 5 and the
+  known collisions step 6, while Colima stays step 7.
+- `python@3.13` in the `Brewfile`, so `python3` is a current Python: agent-sync needs 3.11 or
+  newer for `tomllib`, and the Herdr agent hooks do nothing when `python3` is missing.
+  **Upgrade steps:** run `./setup.sh` to install it.
+
 ### Removed
 
 - Zed and GitHub Copilot CLI. Their casks, and the `font-symbols-only-nerd-font` cask that only
   served Yazi's icons in Zed's terminal, are no longer in the `Brewfile`; `setup.sh` no longer
   registers Herdr's Copilot integration; and the manual setup's step for Yazi icons in Zed is
-  gone, so the Colima step moves up from step 7 to step 6. An existing installation is left alone,
-  because `setup.sh` never uninstalls anything. **Upgrade steps:** none required. To remove them,
-  follow
+  gone. An existing installation is left alone, because `setup.sh` never uninstalls anything.
+  **Upgrade steps:** none required. To remove them, follow
   [Remove Zed and Copilot CLI from an existing installation](docs/manual-setup.md#remove-zed-and-copilot-cli-from-an-existing-installation),
   which also says what the optional `--zap` deletes; skip it for a tool you still use.
 

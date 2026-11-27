@@ -6,7 +6,7 @@
 # plugins/hhdebb.herdr-radar/config.toml.
 #
 # Delivery, the part that bites: no script places this file. You apply it, or
-# hand that to a coding agent, by following step 3 of docs/manual-setup.md: a
+# hand that to a coding agent, by following step 4 of docs/manual-setup.md: a
 # copy on a Mac with no Herdr config yet, a merge into one that has. Herdr has
 # no include directive, and the destination has other writers — Herdr itself
 # (onboarding, its settings panel) and herdr-radar, which keeps three

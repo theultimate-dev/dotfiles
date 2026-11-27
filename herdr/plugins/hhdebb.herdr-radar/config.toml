@@ -4,7 +4,7 @@
 # working, who is waiting on you, who went quiet. This is the source for
 # $(herdr plugin config-dir hhdebb.herdr-radar)/config.toml, which is
 # ~/.config/herdr/plugins/config/hhdebb.herdr-radar/config.toml. Like
-# ../../config.toml, no script places it: step 3 of docs/manual-setup.md copies
+# ../../config.toml, no script places it: step 4 of docs/manual-setup.md copies
 # it onto a Mac that has none and merges it into one that has. See
 # docs/decisions/0013-apply-the-herdr-config-by-hand.md.
 #
