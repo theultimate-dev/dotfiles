@@ -1525,28 +1525,27 @@ def sync_claude(ctx):
     if plugins is None:
         return
     state = ctx.applied(h)
-    managed, unknown, rows = set(), set(), []
-    for m in marketplaces_for(ctx, h):
+    managed, unknown, rows, work = set(), set(), [], []
+    for m in marketplaces_for(ctx, h):      # marketplaces first, then their plugins (spec §10)
         src, cat = resolve_marketplace(ctx, m, h)
-        if src is None:
+        if src is None or cat is None and m.plugins == "all":
             unknown.add(m.name)
-            continue
-        if cat is None and m.plugins == "all":
-            unknown.add(m.name)
-            ctx.report.add(h, "marketplace %s" % m.name, "unchecked",
-                           "catalog not fetched yet; its plugins are listed by --check or a run")
+            if src is not None:
+                ctx.report.add(h, "marketplace %s" % m.name, "unchecked", "catalog not fetched "
+                               "yet; its plugins are listed by --check or a run")
             continue
         enrolled, failed = enrol(ctx, m, h, cat)
         before = (state.get(m.name) or {}).get("revision") or src.before
         proceed = claude_marketplace(ctx, m, src, markets.get(m.name), state)
         ctx.save_state()
+        managed.update(e.id for e in enrolled)
+        work.append((m, cat, enrolled, failed, proceed, before != src.revision))
+    for m, cat, enrolled, failed, proceed, moved in work:
         for pid, why in failed:
             ctx.report.add(h, pid, "failed", why)
-        managed.update(e.id for e in enrolled)
         if not proceed:
             skip_plugins(ctx, h, enrolled, "marketplace %s needs attention above" % m.name)
             continue
-        moved = before != src.revision
         for e in enrolled:
             row = claude_plugin(ctx, m, e, plugins.get(e.id), moved)
             if row is not None:
@@ -1758,7 +1757,8 @@ def sync_codex(ctx):
     markets = {mk.get("name"): mk for mk in doc["marketplaces"] if isinstance(mk, dict)}
     refs = codex_refs(ctx)
     state = ctx.applied(h)
-    for m in marketplaces_for(ctx, h):
+    work = []
+    for m in marketplaces_for(ctx, h):      # marketplaces first, then their plugins (spec §10)
         src, cat = resolve_marketplace(ctx, m, h)
         if src is None:
             continue
@@ -1769,6 +1769,8 @@ def sync_codex(ctx):
         enrolled, failed = enrol(ctx, m, h, cat)
         proceed = codex_marketplace(ctx, m, src, markets.get(m.name), refs, state)
         ctx.save_state()
+        work.append((m, src, cat, enrolled, failed, proceed))
+    for m, src, cat, enrolled, failed, proceed in work:
         for pid, why in failed:
             ctx.report.add(h, pid, "failed", why)
         if not proceed:
@@ -1879,7 +1881,7 @@ def agy_copy(ctx, skill, label):
                                                    "edited copy is archived)"
                                   % (tilde(dest), name), reason="edited")
         if current == digest and record is not None:
-            return ctx.report.add(h, item, "unchanged", label)
+            return ctx.report.add(h, item, "unchanged", label.split(" (")[0])
     if not ctx.apply:
         return ctx.report.add(h, item, "unchecked", "would copy %s, %s to %s"
                               % (label, files(count), tilde(dest)))
